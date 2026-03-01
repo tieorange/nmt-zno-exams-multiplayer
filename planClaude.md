@@ -1,14 +1,15 @@
 # 🤖 Claude Implementation Log
 
 > This document records what has been implemented so the next AI agent can continue without re-reading the entire plan.
-> Last updated: after full review + bug fix pass.
+> Last updated: after Phase 3 (Flutter frontend) complete.
 
 ---
 
 ## ✅ Current State
 
-**Backend: Phases 0, 1, 2 COMPLETE. `make check-be` passes with 0 TypeScript errors.**
-**Frontend: NOT started.**
+**Backend: Phases 0, 1, 2 COMPLETE. `tsc --noEmit` passes with 0 TypeScript errors.**
+**Frontend: Phase 3 COMPLETE. `flutter analyze --no-fatal-infos` passes with 0 issues.**
+**Remaining: Phase 4 (Supabase setup + deploy) — needs real .env credentials.**
 
 ---
 
@@ -50,6 +51,28 @@
 
 ### `backend/src/main.ts`
 - Express + CORS + Helmet entry point
+
+### `frontend/`
+- `pubspec.yaml` — packages: flutter_bloc, fpdart, go_router, supabase_flutter, flutter_animate, percent_indicator, confetti, logger, equatable, url_launcher, http
+- `lib/main.dart` — app entry, Supabase init, BlocProviders (RoomCubit, QuizCubit, GameCubit)
+- `lib/config/router.dart` — go_router v17 routes: `/`, `/create`, `/room/:code`, `/room/:code/game`, `/room/:code/reveal`, `/room/:code/results`
+- `lib/services/supabase_service.dart` — Realtime Broadcast subscription, typed `RealtimeEvent` stream
+- `lib/services/api_service.dart` — HTTP calls to Node.js REST (createRoom, joinRoom, startGame, submitAnswer, getSubjects)
+- `lib/core/failures.dart` + `typedefs.dart` — fpdart Either error handling
+- `lib/data/models/question_model.dart` — `ClientQuestion.fromJson()`
+- `lib/data/models/player_model.dart` — `PlayerModel.fromJson()`
+- `lib/presentation/cubits/game_cubit/` — `createRoom` REST call
+- `lib/presentation/cubits/room_cubit/` — lobby state, joinRoom (subscribe before REST), startGame, player disconnect handler
+- `lib/presentation/cubits/quiz_cubit/` — in-game state: question, 5-min timer, answers, reveal, game:end
+- `lib/presentation/pages/home_screen.dart` — two buttons + join dialog
+- `lib/presentation/pages/create_room_screen.dart` — subject picker + player count
+- `lib/presentation/pages/room_lobby_screen.dart` — auto-join on init, player list, start button for creator
+- `lib/presentation/pages/gameplay_screen.dart` — TimerBar + question + AnswerButton grid + PlayerChip row
+- `lib/presentation/pages/round_reveal_screen.dart` — correct/wrong highlight, scoreboard, 4s auto-advance
+- `lib/presentation/pages/results_screen.dart` — scoreboard, confetti, creator gets "Нова гра" button
+- `lib/presentation/widgets/timer_bar.dart` — LinearPercentIndicator, green→orange→red
+- `lib/presentation/widgets/answer_button.dart` — AnimatedContainer + flutter_animate scale bounce
+- `lib/presentation/widgets/player_chip.dart` — colored avatar chip with answered checkmark
 
 ---
 
