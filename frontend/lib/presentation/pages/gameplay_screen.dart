@@ -47,7 +47,7 @@ class GameplayScreen extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  TimerBar(remaining: q.timeRemaining),
+                  TimerBar(remaining: q.timeRemaining, total: q.totalTime),
                   const SizedBox(height: 20),
                   // Question card
                   Container(

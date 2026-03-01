@@ -13,10 +13,11 @@ export async function getRandomQuestions(subject: string, count: number): Promis
   const { data, error } = await supabase
     .from('questions')
     .select('id, subject, text, choices, correct_answer_index, exam_type')
-    .eq('subject', subject);
+    .eq('subject', subject)
+    .order('random')
+    .limit(count);
   if (error) throw new Error(`[QuestionRepo] getRandomQuestions failed: ${error.message}`);
-  const shuffled = (data ?? []).sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, count);
+  return data ?? [];
 }
 
 export async function getQuestionsByIds(ids: string[]): Promise<Question[]> {

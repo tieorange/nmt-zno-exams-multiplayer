@@ -16,6 +16,7 @@ class QuizQuestion extends QuizState {
   final int questionIndex;
   final int totalQuestions;
   final Duration timeRemaining;
+  final Duration totalTime;
   final int? myAnswer;
   final Map<String, int?> playerAnswers;
 
@@ -24,6 +25,7 @@ class QuizQuestion extends QuizState {
     required this.questionIndex,
     required this.totalQuestions,
     required this.timeRemaining,
+    required this.totalTime,
     this.myAnswer,
     this.playerAnswers = const {},
   });
@@ -37,12 +39,13 @@ class QuizQuestion extends QuizState {
     questionIndex: questionIndex,
     totalQuestions: totalQuestions,
     timeRemaining: timeRemaining ?? this.timeRemaining,
+    totalTime: totalTime,
     myAnswer: myAnswer == _kUndefined ? this.myAnswer : myAnswer as int?,
     playerAnswers: playerAnswers ?? this.playerAnswers,
   );
 
   @override
-  List<Object?> get props => [question, questionIndex, timeRemaining, myAnswer, playerAnswers];
+  List<Object?> get props => [question, questionIndex, timeRemaining, totalTime, myAnswer, playerAnswers];
 }
 
 // Sentinel to distinguish "not provided" from "explicitly set to null" in copyWith

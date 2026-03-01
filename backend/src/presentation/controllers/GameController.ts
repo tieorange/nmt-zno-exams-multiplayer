@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { getRoom, getPlayers } from '../../data/repositories/RoomRepository.js';
+import { validatePlayerInRoom } from './RoomController.js';
 import {
   startGame as engineStartGame,
   submitAnswer as engineSubmitAnswer,
@@ -47,6 +48,14 @@ export async function submitAnswer(req: Request, res: Response) {
   }
 
   const { playerId, questionId, answerIndex } = parsed.data;
+
+  // Validate player belongs to room - defense against identity spoofing
+  const isValidPlayer = await validatePlayerInRoom(code, playerId);
+  if (!isValidPlayer) {
+    res.status(403).json({ error: 'Player does not belong to this room' });
+    return;
+  }
+
   logger.info(
     `[GameController] answer | roomCode=${code} playerId=${playerId} answerIndex=${answerIndex}`,
   );

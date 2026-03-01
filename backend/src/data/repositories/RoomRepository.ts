@@ -89,3 +89,43 @@ export async function resetScores(roomCode: string): Promise<void> {
   const { error } = await supabase.from('players').update({ score: 0 }).eq('room_code', roomCode);
   if (error) throw new Error(`[RoomRepo] resetScores failed: ${error.message}`);
 }
+
+export interface RoundAnswer {
+  id: string;
+  room_code: string;
+  round_number: number;
+  player_id: string;
+  question_id: string;
+  answer_index: number;
+  is_correct: boolean;
+  created_at: string;
+}
+
+export async function saveRoundAnswer(
+  roomCode: string,
+  roundNumber: number,
+  playerId: string,
+  questionId: string,
+  answerIndex: number,
+  isCorrect: boolean,
+): Promise<void> {
+  const { error } = await supabase.from('round_answers').insert({
+    room_code: roomCode,
+    round_number: roundNumber,
+    player_id: playerId,
+    question_id: questionId,
+    answer_index: answerIndex,
+    is_correct: isCorrect,
+  });
+  if (error) throw new Error(`[RoomRepo] saveRoundAnswer failed: ${error.message}`);
+}
+
+export async function getRoundAnswers(roomCode: string, roundNumber: number): Promise<RoundAnswer[]> {
+  const { data, error } = await supabase
+    .from('round_answers')
+    .select('*')
+    .eq('room_code', roomCode)
+    .eq('round_number', roundNumber);
+  if (error) throw new Error(`[RoomRepo] getRoundAnswers failed: ${error.message}`);
+  return data ?? [];
+}

@@ -75,6 +75,7 @@ class QuizCubit extends Cubit<QuizState> {
         questionIndex: _questionIndex,
         totalQuestions: _totalQuestions,
         timeRemaining: Duration(milliseconds: _timerMs),
+        totalTime: Duration(milliseconds: _timerMs),
       ),
     );
     _startTimer();

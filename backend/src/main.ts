@@ -18,7 +18,30 @@ process.on('uncaughtException', (err) => {
 
 const app = express();
 
-app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
+// CORS configuration - require explicit origin in production
+const isProduction = process.env.NODE_ENV === 'production';
+const corsOrigin = process.env.CORS_ORIGIN;
+
+// Development defaults (only if CORS_ORIGIN is not set)
+const developmentOrigins = ['http://localhost:3000', 'http://localhost:4200'];
+
+let allowedOrigin: string | string[];
+
+if (corsOrigin) {
+    // If explicitly configured, use it
+    allowedOrigin = corsOrigin;
+} else if (isProduction) {
+    // In production, CORS_ORIGIN must be explicitly set
+    throw new Error(
+        'CORS_ORIGIN environment variable is required in production. ' +
+        'Please set CORS_ORIGIN to your frontend URL (e.g., https://your-app.vercel.app)'
+    );
+} else {
+    // In development, allow common localhost ports
+    allowedOrigin = developmentOrigins;
+}
+
+app.use(cors({ origin: allowedOrigin }));
 app.use(helmet());
 app.use(express.json());
 app.use('/api', routes);

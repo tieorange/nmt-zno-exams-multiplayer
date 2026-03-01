@@ -6,6 +6,9 @@ import {
   incrementPlayerScore,
   deleteRoom,
   resetScores,
+  saveRoundAnswer,
+  getRoundAnswers,
+  type RoundAnswer,
 } from '../data/repositories/RoomRepository.js';
 import {
   getRandomQuestions,
@@ -240,16 +243,33 @@ async function revealRound(
   // Update scores in parallel to reduce broadcast latency
   const players = await getPlayers(roomCode);
   const scoreUpdates: Promise<void>[] = [];
+  const answerSaves: Promise<void>[] = [];
 
   for (const player of players) {
     const answer = state.answers.get(player.id);
     if (answer === correctIndex) {
       scoreUpdates.push(incrementPlayerScore(roomCode, player.id, CORRECT_ANSWER_POINTS));
     }
+    // Persist answer to database (null answer means player didn't answer)
+    if (answer !== null && answer !== undefined) {
+      answerSaves.push(
+        saveRoundAnswer(
+          roomCode,
+          questionIndex,
+          player.id,
+          questionDoc.id,
+          answer,
+          answer === correctIndex,
+        ),
+      );
+    }
   }
 
   if (scoreUpdates.length > 0) {
     await Promise.all(scoreUpdates);
+  }
+  if (answerSaves.length > 0) {
+    await Promise.all(answerSaves);
   }
 
   // Re-fetch fresh scores from DB after all increments complete — avoids broadcasting
@@ -344,4 +364,21 @@ export function getCurrentClientQuestion(roomCode: string) {
     choices: q.choices,
     questionIndex: state.questionIndex,
   };
+}
+
+/**
+ * Loads round answers from the database for a specific room and round.
+ * Returns a Map of playerId -> answerIndex for the given round.
+ * Used for recovering answer state if needed.
+ */
+export async function loadRoundAnswersFromDb(
+  roomCode: string,
+  roundNumber: number,
+): Promise<Map<string, number>> {
+  const answers = await getRoundAnswers(roomCode, roundNumber);
+  const answerMap = new Map<string, number>();
+  for (const a of answers) {
+    answerMap.set(a.player_id, a.answer_index);
+  }
+  return answerMap;
 }

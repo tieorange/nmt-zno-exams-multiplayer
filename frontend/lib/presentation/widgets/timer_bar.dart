@@ -3,9 +3,9 @@ import 'package:percent_indicator/linear_percent_indicator.dart';
 
 class TimerBar extends StatelessWidget {
   final Duration remaining;
-  static const total = Duration(minutes: 5);
+  final Duration total;
 
-  const TimerBar({super.key, required this.remaining});
+  const TimerBar({super.key, required this.remaining, required this.total});
 
   double get percent => (remaining.inMilliseconds / total.inMilliseconds).clamp(0.0, 1.0);
 

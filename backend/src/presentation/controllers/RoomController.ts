@@ -14,6 +14,21 @@ import { registerPlayerSession, registerPingOnly, getPlayerBySession, pingHeartb
 import { logger } from '../../config/logger.js';
 import { getCurrentClientQuestion } from '../../services/GameEngine.js';
 
+/**
+ * Validates that a player belongs to a room by checking the database.
+ * This provides defense-in-depth against identity spoofing attacks.
+ * @returns true if the player exists in the room, false otherwise
+ */
+export async function validatePlayerInRoom(roomCode: string, playerId: string): Promise<boolean> {
+  try {
+    const players = await getPlayers(roomCode);
+    return players.some(p => p.id === playerId);
+  } catch (error) {
+    logger.error(`[RoomController] validatePlayerInRoom error | roomCode=${roomCode} playerId=${playerId} err=${error}`);
+    return false;
+  }
+}
+
 export async function createRoom(req: Request, res: Response) {
   const parsed = CreateRoomSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -157,6 +172,13 @@ export async function heartbeat(req: Request, res: Response) {
   const parsed = HeartbeatSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  // Validate player belongs to room - defense against identity spoofing
+  const isValidPlayer = await validatePlayerInRoom(code, parsed.data.playerId);
+  if (!isValidPlayer) {
+    res.status(403).json({ error: 'Player does not belong to this room' });
     return;
   }
 

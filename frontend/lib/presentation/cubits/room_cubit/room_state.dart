@@ -11,6 +11,9 @@ class RoomState extends Equatable {
   final List<PlayerModel> players;
   final String? errorMessage;
 
+  // Sentinel value to detect if errorMessage was explicitly passed
+  static const _errorMessageUnset = Object();
+
   const RoomState({
     this.code = '',
     this.subject = '',
@@ -26,15 +29,16 @@ class RoomState extends Equatable {
     RoomStatus? status,
     int? maxPlayers,
     List<PlayerModel>? players,
-    String? errorMessage,
-    bool clearError = false,
+    Object? errorMessage = _errorMessageUnset,
   }) => RoomState(
     code: code ?? this.code,
     subject: subject ?? this.subject,
     status: status ?? this.status,
     maxPlayers: maxPlayers ?? this.maxPlayers,
     players: players ?? this.players,
-    errorMessage: clearError ? null : (errorMessage ?? this.errorMessage),
+    errorMessage: identical(errorMessage, _errorMessageUnset)
+        ? this.errorMessage
+        : errorMessage as String?,
   );
 
   @override
