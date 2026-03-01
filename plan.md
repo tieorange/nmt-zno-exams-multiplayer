@@ -40,10 +40,13 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 ## 🏗️ Tech Stack (Decided)
 
 ### Backend
-- **Node.js + Express + TypeScript** — REST + Socket.io server
-- **MongoDB Atlas** (free tier) — document DB, perfect for JSON question storage
+- **Node.js + Express + TypeScript** — thin REST API + server-authoritative game engine (timers, scoring, answer validation)
+- **Supabase PostgreSQL** (free tier) — `questions` and `rooms`/`players` tables; Node.js uses service-role key (full access); Flutter uses anon key (never sees `correct_answer_index`)
+- **Supabase Realtime** (Broadcast) — server→client real-time event bus; Node.js broadcasts via REST API with service-role key; Flutter clients subscribe directly to channels
 - **Clean Architecture** — `domain / data / presentation` layers split by feature
 - Copy `data-set/types.ts` into backend as the canonical type source
+
+> **Why keep Node.js?** Supabase Realtime has no server-side logic — it's a dumb pub/sub bus. The 5-minute round timer, answer validation, scoring, and `correct_answer_index` security all require a real server process.
 
 ### Frontend
 - **Flutter Web** — cross-platform, runs in browser
@@ -63,10 +66,9 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 | Package | Version | Purpose |
 |---|---|---|
 | `express` | `^4.18` | HTTP server |
-| `socket.io` | `^4.7` | Real-time events |
-| `mongoose` | `^8.0` | MongoDB ODM + validation |
+| `@supabase/supabase-js` | `^2.0` | Supabase client (DB queries + Realtime broadcast) |
 | `nanoid` | `^5.0` | 3-char room code generation |
-| `zod` | `^3.22` | Socket payload validation |
+| `zod` | `^3.22` | Request payload validation |
 | `pino` | `^8.17` | Structured JSON logger |
 | `pino-pretty` | `^10.3` | Dev-friendly log formatting |
 | `express-rate-limit` | `^7.1` | Rate-limit room creation |
@@ -79,12 +81,14 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 | `@types/uuid` (dev) | `^9.0` | TypeScript types for uuid |
 
 > Use `tsx` for all scripts and dev server — it's faster than `ts-node`.
+>
+> **No Socket.io, no Mongoose.** Real-time transport = Supabase Realtime. Database = Supabase PostgreSQL via `@supabase/supabase-js`.
 
 ### Frontend (`frontend/pubspec.yaml`)
 
 | Package | Version | Purpose |
 |---|---|---|
-| `socket_io_client` | `^2.0` | Socket.io WebSocket client |
+| `supabase_flutter` | `^2.0` | Supabase client: Realtime subscriptions + anon DB queries |
 | `flutter_bloc` | `^8.1` | Cubit-based state management |
 | `fpdart` | `^1.1` | `Either<Failure, T>` error handling |
 | `go_router` | `^13.0` | Web-aware navigation + deep links |
@@ -95,7 +99,9 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 | `logger` | `^2.0` | Structured logs with tag prefix |
 | `equatable` | `^2.0` | Value equality for Cubit states |
 | `url_launcher` | `^6.2` | Share link button |
-| `http` | `^1.2` | HTTP client for REST calls (POST /api/rooms from GameCubit) |
+| `http` | `^1.2` | HTTP client for REST calls to Node.js backend |
+
+> **No `socket_io_client`.** Real-time events received via `supabase_flutter` Broadcast channel subscriptions. Mutations (join/start/answer) sent via `http` REST calls to Node.js.
 
 ---
 
@@ -109,16 +115,16 @@ nmt-zno-exams-multiplayer/
 ├── backend/                ← Node.js server (Phase 1–2)
 │   └── src/
 │       ├── domain/         ← Entities, repository interfaces, types
-│       ├── data/           ← Mongoose models, repository implementations
+│       ├── data/           ← Supabase query helpers (no Mongoose)
 │       ├── services/       ← GameEngine, RoomService, CodeGenerator, NameGenerator
-│       ├── presentation/   ← Express routes, Socket handlers, Zod validators
-│       ├── config/         ← db.ts, logger.ts
-│       └── scripts/seed.ts ← One-time DB seeding
+│       ├── presentation/   ← Express routes, REST controllers, Zod validators
+│       ├── config/         ← supabase.ts (client + broadcastToRoom), logger.ts
+│       └── scripts/seed.ts ← One-time DB seeding via Supabase upsert
 └── frontend/               ← Flutter Web app (Phase 3)
     └── lib/
         ├── config/         ← router.dart, logger.dart
         ├── core/           ← failures.dart, typedefs.dart
-        ├── services/       ← socket_service.dart
+        ├── services/       ← supabase_service.dart (Realtime), api_service.dart (REST)
         ├── data/           ← models/, repositories/
         ├── domain/         ← entities/, usecases/
         └── presentation/   ← cubits/, pages/, widgets/
@@ -169,21 +175,27 @@ nmt-zno-exams-multiplayer/
 
 ---
 
-## ⚡ Real-time Events (Socket.io)
+## ⚡ Real-time Events
 
-| Event | Direction | Payload |
-|---|---|---|
-| `room:join` | client → server | `{ roomCode }` — name/color assigned server-side |
-| `room:joined` | server → joining client only | `{ playerId, name, color, isCreator }` — tells you your own identity |
-| `room:state` | server → all in room | `{ code, subject, status, maxPlayers, players }` |
-| `game:start` | client → server | `{}` — creator triggers game start |
-| `game:start` | server → all | `{ totalQuestions: 10 }` — game has begun |
-| `question:new` | server → all | `ClientQuestion` (no `correct_answer_index`) |
-| `player:answer` | client → server | `{ questionId, answerIndex }` |
-| `round:update` | server → all | `{ playerAnswers }` — partial results as players answer |
-| `round:reveal` | server → all | `{ correctIndex, playerAnswers, scores }` |
-| `game:end` | server → all | `{ scoreboard }` |
-| `player:disconnected` | server → all | `{ playerId }` |
+> **Two transports:**
+> - **Client → Server** mutations: HTTP POST to Node.js REST API
+> - **Server → Client** broadcasts: Supabase Realtime Broadcast on channel `room:{CODE}`
+>
+> Flutter subscribes to `supabase.channel('room:A9X')` for all incoming events.
+> Node.js broadcasts via `POST /realtime/v1/api/broadcast` with service-role key.
+
+| Event / Endpoint | Direction | Transport | Payload |
+|---|---|---|---|
+| `POST /api/rooms/:code/join` | client → server | REST | `{}` body → returns `{ playerId, name, color, isCreator }` |
+| `room:state` | server → all in room | Supabase Broadcast | `{ code, subject, status, maxPlayers, players }` |
+| `POST /api/rooms/:code/start` | client → server | REST | `{ playerId }` — creator triggers game start |
+| `game:start` | server → all | Supabase Broadcast | `{ totalQuestions: 10 }` — game has begun |
+| `question:new` | server → all | Supabase Broadcast | `ClientQuestion` (no `correct_answer_index`) |
+| `POST /api/rooms/:code/answer` | client → server | REST | `{ playerId, questionId, answerIndex }` |
+| `round:update` | server → all | Supabase Broadcast | `{ playerAnswers }` — partial results as players answer |
+| `round:reveal` | server → all | Supabase Broadcast | `{ correctIndex, playerAnswers, scores }` |
+| `game:end` | server → all | Supabase Broadcast | `{ scoreboard }` |
+| `player:disconnected` | server → all | Supabase Broadcast | `{ playerId }` |
 
 ---
 
@@ -211,75 +223,91 @@ nmt-zno-exams-multiplayer/
 
 ---
 
-## 🗄️ MongoDB Collections
+## 🗄️ Supabase PostgreSQL Tables
+
+> Create these via Supabase MCP or the Supabase SQL editor before running the seed script.
 
 ### `questions`
-```json
-{
-  "_id": "osy_history_42",
-  "subject": "history",
-  "text": "...",
-  "choices": ["...", "..."],
-  "correct_answer_index": 0,
-  "exam_type": "ZNO_NMT_General"
-}
+```sql
+CREATE TABLE questions (
+  id                   TEXT PRIMARY KEY,   -- e.g. "osy_history_42"
+  subject              TEXT NOT NULL,
+  text                 TEXT NOT NULL,
+  choices              TEXT[] NOT NULL,
+  correct_answer_index INTEGER NOT NULL,
+  exam_type            TEXT
+);
+
+CREATE INDEX idx_questions_subject ON questions (subject);
 ```
-**Index:** `{ subject: 1 }`  
-**Seed:** `data-set/questions/all.json` (3,595 docs)
+**Seed:** `data-set/questions/all.json` (3,595 rows) via `npm run seed`
+
+> **Security:** `correct_answer_index` is never queried by client-facing code. Node.js uses the **service-role key** (bypasses RLS, full access) and manually strips the field before broadcasting `question:new`. Flutter uses the **anon key** and never queries this table directly.
 
 ### `rooms`
-```json
-{
-  "code": "A9X",
-  "subject": "history",
-  "status": "waiting | playing | finished",
-  "maxPlayers": 4,
-  "players": [
-    {
-      "id": "uuid-v4",
-      "socketId": "socket.io-connection-id",
-      "name": "Веселий Кит",
-      "color": "#FF6B6B",
-      "score": 0,
-      "isCreator": true,
-      "joinedAt": "...",
-      "lastSeen": "..."
-    }
-  ],
-  "questionIds": ["osy_history_42", "osy_history_7", "..."],
-  "currentQuestionIndex": 0,
-  "roundStartedAt": "...",
-  "createdAt": "..."
-}
+```sql
+CREATE TABLE rooms (
+  code                    TEXT PRIMARY KEY,  -- e.g. "A9X"
+  subject                 TEXT NOT NULL,
+  status                  TEXT NOT NULL DEFAULT 'waiting'
+                            CHECK (status IN ('waiting', 'playing', 'finished')),
+  max_players             INTEGER NOT NULL,
+  question_ids            TEXT[] DEFAULT '{}',
+  current_question_index  INTEGER DEFAULT 0,
+  round_started_at        TIMESTAMPTZ,
+  created_at              TIMESTAMPTZ DEFAULT now()
+);
+
+-- Auto-delete rooms older than 1 hour (handled in Node.js GameEngine cleanup)
 ```
-> Note: `players` array starts **empty** when room is created via REST. Players are added when they connect via `room:join` socket event.
+
+### `players`
+```sql
+CREATE TABLE players (
+  id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  room_code   TEXT NOT NULL REFERENCES rooms(code) ON DELETE CASCADE,
+  name        TEXT NOT NULL,
+  color       TEXT NOT NULL,
+  score       INTEGER DEFAULT 0,
+  is_creator  BOOLEAN DEFAULT false,
+  joined_at   TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_players_room ON players (room_code);
+```
+
+> Note: `players` table starts **empty** when room is created via `POST /api/rooms`. Players are added when they call `POST /api/rooms/:code/join`.
 
 ---
 
 ## 🪜 Build Steps (in order)
 
+### Phase 0: Supabase Project Setup (do this first, before writing any code)
+- [ ] Create Supabase project at [supabase.com](https://supabase.com) (free tier)
+- [ ] Run SQL from the "Supabase PostgreSQL Tables" section above (via MCP or SQL editor)
+- [ ] Copy `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `SUPABASE_ANON_KEY` to `backend/.env`
+
 ### Phase 1: Backend Foundation
 - [ ] Init Node.js + Express + TypeScript project
-- [ ] Connect to MongoDB Atlas (free tier)
-- [ ] Seed database from `data-set/questions/all.json`
-- [ ] Create index on `{ subject: 1 }`
-- [ ] REST endpoint: `GET /subjects` — returns subject list + question counts
-- [ ] REST endpoint: `POST /rooms` — creates room, returns code
-- [ ] REST endpoint: `GET /rooms/:code` — returns room state
+- [ ] Connect to Supabase via `@supabase/supabase-js` (service-role key)
+- [ ] Seed database from `data-set/questions/all.json` via Supabase upsert
+- [ ] REST endpoint: `GET /api/subjects` — returns subject list + question counts
+- [ ] REST endpoint: `POST /api/rooms` — creates room, returns code
+- [ ] REST endpoint: `GET /api/rooms/:code` — returns room state
 
 ### Phase 2: Real-time Game Engine
-- [ ] Integrate Socket.io into Express server
-- [ ] Implement `room:join` handler + lobby broadcast
-- [ ] Implement `game:start` — sample 10 questions, lock room
-- [ ] Implement question timer (5 min server-side, authoritative)
-- [ ] Implement `player:answer` handler + `round:reveal` emit
-- [ ] Implement `game:end` with scoreboard
-- [ ] Handle all disconnection edge cases
+- [ ] Implement `POST /api/rooms/:code/join` — add player, broadcast `room:state` via Supabase, return player identity
+- [ ] Implement `POST /api/rooms/:code/start` — sample 10 questions, lock room, broadcast `game:start` + first `question:new`
+- [ ] Implement question timer (5 min server-side, authoritative — `setTimeout` in Node.js)
+- [ ] Implement `POST /api/rooms/:code/answer` — record answer, broadcast `round:update`; when all answered → `round:reveal`
+- [ ] Implement `game:end` with scoreboard broadcast
+- [ ] Handle disconnection edge cases (on process restart, rooms clean up)
 
 ### Phase 3: Flutter Frontend
 - [ ] Init Flutter Web project (`flutter create --platforms web frontend`)
 - [ ] Add all packages from Confirmed Package Versions table
-- [ ] `SocketService` — wraps socket_io_client, exposes event stream
+- [ ] `SupabaseService` — initializes `supabase_flutter`, subscribes to room Broadcast channel
+- [ ] `ApiService` — HTTP calls to Node.js REST endpoints (join, start, answer)
 - [ ] `RoomCubit` — lobby state (waiting/ready/gameStarted)
 - [ ] `QuizCubit` — in-game state (question, timer countdown, answers, reveal)
 - [ ] `GameCubit` — overall flow (create/join/results)
@@ -298,8 +326,8 @@ nmt-zno-exams-multiplayer/
 - [ ] `percent_indicator` — timer bar color urgency (green → orange → red)
 - [ ] `confetti` — win screen celebration
 - [ ] Responsive layout: vertical stack on mobile (<600px), 70/30 split on desktop
-- [ ] Deploy backend → Railway (set env vars: `MONGODB_URI`, `PORT`, `CORS_ORIGIN`)
-- [ ] Deploy frontend → Firebase Hosting (`flutter build web --release && firebase deploy`)
+- [ ] Deploy backend → Render (set env vars: `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `PORT`, `CORS_ORIGIN`)
+- [ ] Deploy frontend → Firebase Hosting (`flutter build web --release --dart-define=API_URL=... --dart-define=SUPABASE_URL=... --dart-define=SUPABASE_ANON_KEY=... && firebase deploy`)
 
 > See [`planImplementation.md`](./planImplementation.md) for step-by-step commands, file templates, and exact code patterns.
 
@@ -354,9 +382,43 @@ Use the **`logger`** package with a consistent tag prefix per feature.
 
 | Service | What |
 |---|---|
-| **Railway** | Node.js backend (auto-deploys from GitHub, preferred) |
-| **MongoDB Atlas** | Database (M0 free forever) |
+| **Render** (or Railway) | Node.js backend — free tier sleeps after 15min, Socket.io reconnection handles wake-up |
+| **Supabase** | PostgreSQL + Realtime — free tier: 500MB DB, 200 concurrent connections, 100 msg/sec |
 | **Firebase Hosting** | Flutter Web frontend (CDN, fast) |
+
+> **Cold start note:** Render free tier sleeps after 15 min of inactivity. On wake (~30s), Supabase Realtime channels auto-reconnect on the Flutter side — no user action needed.
+
+---
+
+## 🤖 Supabase MCP Server (for AI agents)
+
+The [Supabase MCP server](https://github.com/supabase-community/supabase-mcp) lets Claude Code manage your Supabase project directly — run SQL migrations, inspect table schemas, query data — without leaving the terminal or switching to the Supabase dashboard.
+
+### Setup (one-time, per project)
+
+Add to your `.claude/mcp_servers.json` (or via `claude mcp add`):
+
+```json
+{
+  "supabase": {
+    "command": "npx",
+    "args": ["-y", "@supabase/mcp-server-supabase@latest", "--project-ref", "YOUR_PROJECT_REF"],
+    "env": {
+      "SUPABASE_ACCESS_TOKEN": "your-supabase-personal-access-token"
+    }
+  }
+}
+```
+
+Get your project ref from: `https://supabase.com/dashboard/project/[ref]`
+Get your personal access token from: `https://supabase.com/dashboard/account/tokens`
+
+### What AI agents can do with MCP
+- Create and alter tables (run the schema SQL from "Supabase PostgreSQL Tables" above)
+- Check row counts (`SELECT COUNT(*) FROM questions WHERE subject = 'history'`)
+- Debug data issues without writing a script
+- Inspect indexes, constraints, and RLS policies
+- Run the seed verification after `npm run seed`
 
 ---
 

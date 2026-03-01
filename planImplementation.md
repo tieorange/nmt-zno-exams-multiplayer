@@ -32,12 +32,39 @@ nmt-zno-exams-multiplayer/        ← you are here (git repo)
 
 ## Phase 0 — Scaffold Both Projects
 
+> **Before writing any code:** Set up your Supabase project (free tier at [supabase.com](https://supabase.com)), then configure the MCP server so the AI agent can manage your DB directly.
+
+### 0.0 Supabase MCP Setup (do this first)
+
+The Supabase MCP server lets Claude Code run SQL, inspect schemas, and seed the DB without leaving the terminal.
+
+**Step 1 — Get credentials from Supabase dashboard:**
+- Project ref: from `https://supabase.com/dashboard/project/[ref]` URL
+- Personal access token: `https://supabase.com/dashboard/account/tokens`
+- Service role key: Project → Settings → API → `service_role` (secret)
+- Anon key: Project → Settings → API → `anon` (public)
+- Project URL: Project → Settings → API → Project URL
+
+**Step 2 — Add MCP server:**
+```bash
+# From repo root — add Supabase MCP to this project
+claude mcp add supabase -- npx -y @supabase/mcp-server-supabase@latest \
+  --project-ref YOUR_PROJECT_REF \
+  --read-only false
+```
+Set env var `SUPABASE_ACCESS_TOKEN=your-personal-access-token` in your shell or `.zshrc`.
+
+**Step 3 — Create tables via MCP:**
+Once the MCP server is active in a Claude Code session, the AI agent can run the SQL from `plan.md` → "Supabase PostgreSQL Tables" section directly. No need to open the Supabase SQL editor manually.
+
+---
+
 ### 0.1 Backend
 
 ```bash
 mkdir backend && cd backend
 npm init -y
-npm install express socket.io mongoose nanoid zod pino pino-pretty cors helmet express-rate-limit dotenv uuid
+npm install express @supabase/supabase-js nanoid zod pino pino-pretty cors helmet express-rate-limit dotenv uuid
 npm install -D typescript tsx @types/node @types/express @types/cors @types/uuid
 npx tsc --init
 ```
@@ -77,7 +104,9 @@ npx tsc --init
 **`backend/.env.example`**:
 ```
 PORT=3000
-MONGODB_URI=mongodb+srv://USER:PASS@cluster.mongodb.net/nmt-quiz
+SUPABASE_URL=https://your-project-ref.supabase.co
+SUPABASE_SERVICE_KEY=your-service-role-key-here
+SUPABASE_ANON_KEY=your-anon-key-here
 CORS_ORIGIN=http://localhost:5000
 NODE_ENV=development
 LOG_LEVEL=info
@@ -86,8 +115,9 @@ LOG_LEVEL=info
 > **⚠️ Before running any backend command:** copy and fill in your `.env` file:
 > ```bash
 > cp .env.example .env
-> # Edit .env → set MONGODB_URI from your MongoDB Atlas connection string
-> # Without this, the server crashes on startup with "URI missing"
+> # Edit .env → set SUPABASE_URL and SUPABASE_SERVICE_KEY from your Supabase project
+> # Project → Settings → API → Project URL + service_role key
+> # Without this, the server crashes on startup with "SUPABASE_URL missing"
 > ```
 
 Create folder structure:
@@ -101,7 +131,7 @@ mkdir -p src/{domain/{entities,repositories,exceptions},data/{models,repositorie
 cd ..
 flutter create --platforms web frontend
 cd frontend
-flutter pub add flutter_bloc fpdart go_router socket_io_client flutter_animate percent_indicator confetti logger equatable url_launcher shadcn_flutter http
+flutter pub add flutter_bloc fpdart go_router supabase_flutter flutter_animate percent_indicator confetti logger equatable url_launcher shadcn_flutter http
 ```
 
 Create folder structure:
@@ -125,6 +155,7 @@ ls frontend/lib/main.dart frontend/pubspec.yaml frontend/web/index.html
 # flutter pub get succeeded (packages installed)
 cat frontend/pubspec.lock | grep flutter_bloc
 cat frontend/pubspec.lock | grep shadcn_flutter
+cat frontend/pubspec.lock | grep supabase_flutter
 cat frontend/pubspec.lock | grep '"http"'
 ```
 
@@ -159,95 +190,191 @@ cp ../data-set/types.ts src/domain/types.ts
 
 These are the canonical types — `Question`, `ClientQuestion`, `QuestionSubject`, `SUBJECTS`, etc.
 
-### 1.3 MongoDB Connection
+### 1.3 Supabase Client
 
-**`src/config/db.ts`**:
+**`src/config/supabase.ts`**:
 ```typescript
-import mongoose from 'mongoose';
+import { createClient } from '@supabase/supabase-js';
 import { logger } from './logger.js';
 
-export async function connectDB(): Promise<void> {
-  const uri = process.env.MONGODB_URI!;
-  await mongoose.connect(uri);
-  logger.info('[DB] Connected to MongoDB');
+const url = process.env.SUPABASE_URL;
+const key = process.env.SUPABASE_SERVICE_KEY;
+
+if (!url || !key) {
+  logger.error('[Supabase] SUPABASE_URL or SUPABASE_SERVICE_KEY missing in .env');
+  process.exit(1);
+}
+
+// Service-role client — full DB access, bypasses RLS. NEVER expose this key to clients.
+export const supabase = createClient(url, key, {
+  auth: { persistSession: false },
+});
+
+logger.info('[Supabase] Client initialized');
+
+// Broadcast an event to all Supabase Realtime subscribers of a room channel.
+// Uses the REST broadcast endpoint — works from Node.js without subscribing to the channel.
+export async function broadcastToRoom(
+  roomCode: string,
+  event: string,
+  payload: unknown,
+): Promise<void> {
+  const res = await fetch(`${url}/realtime/v1/api/broadcast`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key}`,
+      'apikey': key,
+    },
+    body: JSON.stringify({
+      messages: [{ topic: `room:${roomCode}`, event, payload }],
+    }),
+  });
+  if (!res.ok) {
+    throw new Error(`[Supabase] broadcastToRoom failed | event=${event} status=${res.status} body=${await res.text()}`);
+  }
 }
 ```
 
-### 1.4 Mongoose Models
+### 1.4 Supabase Repository Helpers
 
-**`src/data/models/QuestionModel.ts`**:
+Replace Mongoose models with typed Supabase query functions.
+
+**`src/data/repositories/QuestionRepository.ts`**:
 ```typescript
-import mongoose from 'mongoose';
+import { supabase } from '../../config/supabase.js';
 
-const questionSchema = new mongoose.Schema(
-  {
-    _id: String,           // uses the JSON "id" field directly (e.g. "osy_history_42")
-    subject: { type: String, required: true, index: true },
-    text: { type: String, required: true },
-    choices: [String],
-    correct_answer_index: { type: Number, required: true },
-    exam_type: String,
-  },
-  { _id: false }           // disable auto ObjectId, we supply _id from the JSON id field
-);
+export interface Question {
+  id: string;
+  subject: string;
+  text: string;
+  choices: string[];
+  correct_answer_index: number;
+  exam_type: string;
+}
 
-questionSchema.index({ subject: 1 });
+export async function getRandomQuestions(subject: string, count: number): Promise<Question[]> {
+  const { data, error } = await supabase
+    .from('questions')
+    .select('id, subject, text, choices, correct_answer_index, exam_type')
+    .eq('subject', subject);
+  if (error) throw new Error(`[QuestionRepo] getRandomQuestions failed: ${error.message}`);
+  const shuffled = (data ?? []).sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, count);
+}
 
-export const QuestionModel = mongoose.model('Question', questionSchema, 'questions');
+export async function getQuestionsByIds(ids: string[]): Promise<Question[]> {
+  const { data, error } = await supabase
+    .from('questions')
+    .select('id, subject, text, choices, correct_answer_index, exam_type')
+    .in('id', ids);
+  if (error) throw new Error(`[QuestionRepo] getQuestionsByIds failed: ${error.message}`);
+  return data ?? [];
+}
+
+export async function getSubjectCounts(): Promise<Record<string, number>> {
+  const { data, error } = await supabase
+    .from('questions')
+    .select('subject');
+  if (error) throw new Error(`[QuestionRepo] getSubjectCounts failed: ${error.message}`);
+  const counts: Record<string, number> = {};
+  for (const row of data ?? []) counts[row.subject] = (counts[row.subject] ?? 0) + 1;
+  return counts;
+}
 ```
 
-**`src/data/models/RoomModel.ts`**:
+**`src/data/repositories/RoomRepository.ts`**:
 ```typescript
-import mongoose from 'mongoose';
+import { supabase } from '../../config/supabase.js';
 
-const playerSchema = new mongoose.Schema({
-  id: String,              // generated player UUID
-  socketId: String,        // current socket connection id
-  name: String,
-  color: String,
-  score: { type: Number, default: 0 },
-  isCreator: Boolean,
-  joinedAt: Date,
-  lastSeen: Date,
-}, { _id: false });
+export interface Room {
+  code: string;
+  subject: string;
+  status: 'waiting' | 'playing' | 'finished';
+  max_players: number;
+  question_ids: string[];
+  current_question_index: number;
+  round_started_at: string | null;
+  created_at: string;
+}
 
-const roomSchema = new mongoose.Schema({
-  code: { type: String, required: true, unique: true },
-  subject: { type: String, required: true },
-  status: { type: String, enum: ['waiting', 'playing', 'finished'], default: 'waiting' },
-  maxPlayers: { type: Number, required: true },
-  players: [playerSchema],
-  questionIds: [String],
-  currentQuestionIndex: { type: Number, default: 0 },
-  roundStartedAt: Date,
-  createdAt: { type: Date, default: Date.now },
-});
+export interface Player {
+  id: string;
+  room_code: string;
+  name: string;
+  color: string;
+  score: number;
+  is_creator: boolean;
+  joined_at: string;
+}
 
-// Auto-delete rooms 1 hour after creation
-roomSchema.index({ createdAt: 1 }, { expireAfterSeconds: 3600 });
+export async function createRoom(code: string, subject: string, maxPlayers: number): Promise<Room> {
+  const { data, error } = await supabase
+    .from('rooms')
+    .insert({ code, subject, max_players: maxPlayers })
+    .select()
+    .single();
+  if (error) throw new Error(`[RoomRepo] createRoom failed: ${error.message}`);
+  return data;
+}
 
-export const RoomModel = mongoose.model('Room', roomSchema, 'rooms');
+export async function getRoom(code: string): Promise<Room | null> {
+  const { data, error } = await supabase
+    .from('rooms').select('*').eq('code', code).maybeSingle();
+  if (error) throw new Error(`[RoomRepo] getRoom failed: ${error.message}`);
+  return data;
+}
+
+export async function updateRoom(code: string, updates: Partial<Room>): Promise<void> {
+  const { error } = await supabase.from('rooms').update(updates).eq('code', code);
+  if (error) throw new Error(`[RoomRepo] updateRoom failed: ${error.message}`);
+}
+
+export async function deleteRoom(code: string): Promise<void> {
+  const { error } = await supabase.from('rooms').delete().eq('code', code);
+  if (error) throw new Error(`[RoomRepo] deleteRoom failed: ${error.message}`);
+}
+
+export async function getPlayers(roomCode: string): Promise<Player[]> {
+  const { data, error } = await supabase
+    .from('players').select('*').eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] getPlayers failed: ${error.message}`);
+  return data ?? [];
+}
+
+export async function addPlayer(roomCode: string, player: Omit<Player, 'room_code' | 'joined_at'>): Promise<void> {
+  const { error } = await supabase
+    .from('players').insert({ ...player, room_code: roomCode });
+  if (error) throw new Error(`[RoomRepo] addPlayer failed: ${error.message}`);
+}
+
+export async function incrementPlayerScore(roomCode: string, playerId: string, delta: number): Promise<void> {
+  const { data: p } = await supabase
+    .from('players').select('score').eq('id', playerId).single();
+  const newScore = (p?.score ?? 0) + delta;
+  const { error } = await supabase
+    .from('players').update({ score: newScore }).eq('id', playerId).eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] incrementPlayerScore failed: ${error.message}`);
+}
 ```
 
 ### 1.5 Seed Script
 
+> **Before running seed:** Make sure the `questions` table exists in Supabase (create it using the SQL in `plan.md` → "Supabase PostgreSQL Tables", either via Supabase MCP or the SQL editor).
+
 **`src/scripts/seed.ts`**:
 ```typescript
 import 'dotenv/config';
-import mongoose from 'mongoose';
 import { readFileSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
-import { QuestionModel } from '../data/models/QuestionModel.js';
+import { supabase } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const JSON_PATH = join(__dirname, '../../../data-set/questions/all.json');
 
 async function seed() {
-  await mongoose.connect(process.env.MONGODB_URI!);
-  logger.info('[Seed] Connected to MongoDB');
-
   const raw = JSON.parse(readFileSync(JSON_PATH, 'utf-8')) as Array<{
     id: string; subject: string; text: string;
     choices: string[]; correct_answer_index: number; exam_type: string;
@@ -256,23 +383,24 @@ async function seed() {
 
   const BATCH = 500;
   for (let i = 0; i < raw.length; i += BATCH) {
-    const batch = raw.slice(i, i + BATCH);
-    await QuestionModel.bulkWrite(
-      batch.map((q) => ({
-        updateOne: {
-          filter: { _id: q.id },
-          update: { $set: { subject: q.subject, text: q.text, choices: q.choices, correct_answer_index: q.correct_answer_index, exam_type: q.exam_type } },
-          upsert: true,
-        },
-      }))
-    );
+    const batch = raw.slice(i, i + BATCH).map((q) => ({
+      id: q.id,
+      subject: q.subject,
+      text: q.text,
+      choices: q.choices,
+      correct_answer_index: q.correct_answer_index,
+      exam_type: q.exam_type,
+    }));
+
+    const { error } = await supabase
+      .from('questions')
+      .upsert(batch, { onConflict: 'id' });
+
+    if (error) throw new Error(`[Seed] Batch failed: ${error.message}`);
     logger.info(`[Seed] Progress: ${Math.min(i + BATCH, raw.length)} / ${raw.length}`);
   }
 
-  logger.info('[Seed] Done. Creating subject index...');
-  await QuestionModel.collection.createIndex({ subject: 1 });
-  logger.info('[Seed] Index created. Disconnecting.');
-  await mongoose.disconnect();
+  logger.info('[Seed] Done.');
 }
 
 seed().catch((e) => { logger.error(e, '[Seed] Failed'); process.exit(1); });
@@ -282,30 +410,38 @@ Run: `cd backend && npm run seed`
 
 Expected output:
 ```
-[Seed] Connected to MongoDB
 [Seed] Loaded 3595 questions from JSON
 [Seed] Progress: 500 / 3595
 ...
 [Seed] Progress: 3595 / 3595
-[Seed] Done. Creating subject index...
-[Seed] Index created. Disconnecting.
+[Seed] Done.
 ```
 
-If you see errors, check `MONGODB_URI` in `backend/.env`.
+If you see errors, check `SUPABASE_URL` and `SUPABASE_SERVICE_KEY` in `backend/.env`.
+
+**Verify via Supabase MCP after seeding:**
+```sql
+SELECT subject, COUNT(*) FROM questions GROUP BY subject ORDER BY subject;
+-- Expected:
+-- geography         | 476
+-- history           | 1138
+-- math              | 58
+-- ukrainian_language | 1923
+```
 
 ### 1.6 Services
 
 **`src/services/CodeGenerator.ts`**:
 ```typescript
 import { customAlphabet } from 'nanoid';
-import { RoomModel } from '../data/models/RoomModel.js';
+import { getRoom } from '../data/repositories/RoomRepository.js';
 
 const gen = customAlphabet('ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789', 3);
 
 export async function generateUniqueCode(): Promise<string> {
   for (let attempt = 0; attempt < 10; attempt++) {
     const code = gen();
-    const existing = await RoomModel.findOne({ code });
+    const existing = await getRoom(code);
     if (!existing) return code;
   }
   throw new Error('Failed to generate unique room code after 10 attempts');
@@ -350,43 +486,54 @@ export function clearRoom(roomCode: string): void {
 
 ### 1.7 Zod Validators
 
-**`src/presentation/validators/socketSchemas.ts`**:
+**`src/presentation/validators/requestSchemas.ts`**:
 ```typescript
 import { z } from 'zod';
-
-export const JoinRoomSchema = z.object({
-  roomCode: z.string().length(3).toUpperCase(),
-});
-
-export const SubmitAnswerSchema = z.object({
-  questionId: z.string().min(1),
-  answerIndex: z.number().int().min(0).max(4),
-});
 
 export const CreateRoomSchema = z.object({
   subject: z.enum(['ukrainian_language', 'history', 'geography', 'math']),
   maxPlayers: z.number().int().min(1).max(4),
 });
+
+export const JoinRoomSchema = z.object({
+  // No body — player identity assigned server-side
+});
+
+export const StartGameSchema = z.object({
+  playerId: z.string().uuid(),
+});
+
+export const SubmitAnswerSchema = z.object({
+  playerId: z.string().uuid(),
+  questionId: z.string().min(1),
+  answerIndex: z.number().int().min(0).max(4),
+});
 ```
 
-### 1.8 REST Routes
+### 1.8 REST Controllers + Routes
 
 **`src/presentation/controllers/SubjectController.ts`**:
 ```typescript
 import { Request, Response } from 'express';
 import { SUBJECTS } from '../../domain/types.js';
+import { getSubjectCounts } from '../../data/repositories/QuestionRepository.js';
 
-export function getSubjects(_req: Request, res: Response) {
-  res.json({ subjects: SUBJECTS });
+export async function getSubjects(_req: Request, res: Response) {
+  const counts = await getSubjectCounts();
+  const subjects = SUBJECTS.map((s) => ({ ...s, questionCount: counts[s.key] ?? 0 }));
+  res.json({ subjects });
 }
 ```
 
 **`src/presentation/controllers/RoomController.ts`**:
 ```typescript
 import { Request, Response } from 'express';
-import { RoomModel } from '../../data/models/RoomModel.js';
+import { v4 as uuid } from 'uuid';
+import { createRoom as dbCreateRoom, getRoom as dbGetRoom, getPlayers, addPlayer } from '../../data/repositories/RoomRepository.js';
 import { generateUniqueCode } from '../../services/CodeGenerator.js';
-import { CreateRoomSchema } from '../validators/socketSchemas.js';
+import { assignName } from '../../services/NameGenerator.js';
+import { broadcastToRoom } from '../../config/supabase.js';
+import { CreateRoomSchema, JoinRoomSchema } from '../validators/requestSchemas.js';
 import { logger } from '../../config/logger.js';
 
 export async function createRoom(req: Request, res: Response) {
@@ -395,31 +542,55 @@ export async function createRoom(req: Request, res: Response) {
 
   const { subject, maxPlayers } = parsed.data;
   const code = await generateUniqueCode();
-
-  // Do NOT create a player here — players are created when they connect via socket.
-  // Creating a player here AND on socket join caused duplicate player entries.
-  const room = await RoomModel.create({ code, subject, maxPlayers, players: [] });
+  await dbCreateRoom(code, subject, maxPlayers);
 
   logger.info(`[RoomController] Room created | code=${code} subject=${subject} maxPlayers=${maxPlayers}`);
-  res.status(201).json({ code, roomId: room._id });
+  res.status(201).json({ code });
 }
 
-export async function getRoom(req: Request, res: Response) {
-  const room = await RoomModel.findOne({ code: req.params.code.toUpperCase() });
+export async function getRoomState(req: Request, res: Response) {
+  const code = req.params.code.toUpperCase();
+  const room = await dbGetRoom(code);
   if (!room) return res.status(404).json({ error: 'Room not found' });
 
-  // Strip sensitive data
-  const safe = {
+  const players = await getPlayers(code);
+  res.json({
     code: room.code,
     subject: room.subject,
     status: room.status,
-    maxPlayers: room.maxPlayers,
-    currentQuestionIndex: room.currentQuestionIndex,
-    players: room.players.map((p) => ({
-      id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.isCreator,
-    })),
-  };
-  res.json(safe);
+    maxPlayers: room.max_players,
+    currentQuestionIndex: room.current_question_index,
+    players: players.map((p) => ({ id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.is_creator })),
+  });
+}
+
+export async function joinRoom(req: Request, res: Response) {
+  const code = req.params.code.toUpperCase();
+  const room = await dbGetRoom(code);
+  if (!room) return res.status(404).json({ error: 'Кімнату не знайдено' });
+  if (room.status !== 'waiting') return res.status(400).json({ error: 'Гра вже почалась' });
+
+  const players = await getPlayers(code);
+  if (players.length >= room.max_players) return res.status(400).json({ error: 'Кімната повна' });
+
+  const { name, color } = assignName(code);
+  const playerId = uuid();
+  const isCreator = players.length === 0;
+
+  await addPlayer(code, { id: playerId, name, color, score: 0, is_creator: isCreator });
+
+  const updatedPlayers = await getPlayers(code);
+  await broadcastToRoom(code, 'room:state', {
+    code,
+    subject: room.subject,
+    status: room.status,
+    maxPlayers: room.max_players,
+    players: updatedPlayers.map((p) => ({ id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.is_creator })),
+  });
+
+  logger.info(`[RoomController] Player joined | roomCode=${code} playerId=${playerId} name=${name} isCreator=${isCreator}`);
+  // Return player identity in HTTP response — replaces socket "room:joined" event
+  res.json({ playerId, name, color, isCreator });
 }
 ```
 
@@ -428,19 +599,23 @@ export async function getRoom(req: Request, res: Response) {
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getSubjects } from '../controllers/SubjectController.js';
-import { createRoom, getRoom } from '../controllers/RoomController.js';
+import { createRoom, getRoomState, joinRoom } from '../controllers/RoomController.js';
+import { startGame, submitAnswer } from '../controllers/GameController.js';
 
 const router = Router();
 
 const roomCreationLimit = rateLimit({
-  windowMs: 15 * 60 * 1000,  // 15 minutes
+  windowMs: 15 * 60 * 1000,
   max: 10,
   message: { error: 'Too many rooms created. Please try again later.' },
 });
 
 router.get('/subjects', getSubjects);
 router.post('/rooms', roomCreationLimit, createRoom);
-router.get('/rooms/:code', getRoom);
+router.get('/rooms/:code', getRoomState);
+router.post('/rooms/:code/join', joinRoom);
+router.post('/rooms/:code/start', startGame);
+router.post('/rooms/:code/answer', submitAnswer);
 
 export default router;
 ```
@@ -450,32 +625,25 @@ export default router;
 **`src/main.ts`**:
 ```typescript
 import 'dotenv/config';
+import './config/supabase.js';  // validates env vars + initializes client on import
 import express from 'express';
-import { createServer } from 'http';
 import cors from 'cors';
 import helmet from 'helmet';
-import { connectDB } from './config/db.js';
 import { logger } from './config/logger.js';
 import routes from './presentation/routes/index.js';
-import { setupSocketIO } from './presentation/handlers/SocketHandler.js';
 
 const app = express();
-const httpServer = createServer(app);
 
 app.use(cors({ origin: process.env.CORS_ORIGIN || '*' }));
 app.use(helmet());
 app.use(express.json());
 app.use('/api', routes);
 
-async function start() {
-  await connectDB();
-  setupSocketIO(httpServer);
-  const PORT = process.env.PORT || 3000;
-  httpServer.listen(PORT, () => logger.info(`[Server] Listening on port ${PORT}`));
-}
-
-start().catch((e) => { logger.error(e, '[Server] Fatal startup error'); process.exit(1); });
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => logger.info(`[Server] Listening on port ${PORT}`));
 ```
+
+> **Note:** No `createServer(http)` needed — we don't run Socket.io. Plain Express is enough. Supabase Realtime runs in Supabase's cloud, not in our process.
 
 ---
 
@@ -484,263 +652,136 @@ start().catch((e) => { logger.error(e, '[Server] Fatal startup error'); process.
 ```bash
 # Dev server starts without errors
 cd backend && npm run dev
-# Should print: [Server] Listening on port 3000
+# Should print: [Supabase] Client initialized  then  [Server] Listening on port 3000
 
 # In a new terminal — test REST endpoints:
 curl http://localhost:3000/api/subjects
-# Expected: { "subjects": [{ "key": "ukrainian_language", ... }, ...] }
+# Expected: { "subjects": [{ "key": "ukrainian_language", "questionCount": 1923 }, ...] }
 
 curl -X POST http://localhost:3000/api/rooms \
   -H 'Content-Type: application/json' \
   -d '{"subject":"history","maxPlayers":2}'
-# Expected: { "code": "A9X", "roomId": "..." }
-# Note: no creatorName/creatorColor — player identity is assigned on socket join, not here
+# Expected: { "code": "A9X" }
+# Note: no player identity yet — assigned when player calls POST /rooms/:code/join
 
-# Save the code from above and test:
+# Save the code from above and test join:
+curl -X POST http://localhost:3000/api/rooms/A9X/join \
+  -H 'Content-Type: application/json'
+# Expected: { "playerId": "uuid-v4", "name": "Веселий Кит", "color": "#FF6B6B", "isCreator": true }
+
+# Get room state:
 curl http://localhost:3000/api/rooms/A9X
-# Expected: room object WITHOUT correct_answer_index anywhere in it
-
-# Verify question count in DB — check server log output from seed:
-# Should show 3595 questions seeded
+# Expected: room object with 1 player — NO correct_answer_index anywhere
 ```
 
-All 3 curl commands must return valid JSON. No 500 errors. Stop the dev server after verifying.
+Checklist:
+- [ ] `GET /api/subjects` returns subjects with correct `questionCount` values (1923, 1138, 476, 58)
+- [ ] `POST /api/rooms` returns `{ code }` — 3-char alphanumeric
+- [ ] `POST /api/rooms/:code/join` returns `{ playerId, name, color, isCreator: true }` for first joiner
+- [ ] Second `POST /api/rooms/:code/join` returns `isCreator: false`
+- [ ] `GET /api/rooms/:code` shows both players, no `correct_answer_index` in response
+- [ ] Server logs are structured and readable in `pino-pretty` format
+
+Stop the dev server after verifying.
 
 ---
 
 ## Phase 2 — Real-time Game Engine
 
-### 2.0 Shared IO State (breaks circular dependency)
+> **Architecture shift from Phase 1:** No Socket.io. All client→server communication is REST. All server→client broadcasts go through Supabase Realtime via `broadcastToRoom()`. The `GameEngine` service has no dependency on Socket.io — it imports `broadcastToRoom` from config.
 
-> **Why this exists:** `GameEngine` needs the `io` server instance to emit events. Without this file, `GameEngine` would import from `SocketHandler` and `SocketHandler` would import from `GameEngine` → circular dep → `io` is `undefined` at runtime.
-
-**`src/presentation/handlers/ioState.ts`**:
-```typescript
-import { Server } from 'socket.io';
-
-// Shared singleton — set once in setupSocketIO(), read everywhere else
-export let io: Server;
-export const socketSessions = new Map<string, { playerId: string; roomCode: string }>();
-
-export function setIO(instance: Server): void {
-  io = instance;
-}
-```
-
-### 2.1 Socket.io Setup
-
-**`src/presentation/handlers/SocketHandler.ts`**:
-```typescript
-import { Server } from 'socket.io';
-import { Server as HTTPServer } from 'http';
-import { logger } from '../../config/logger.js';
-import { registerRoomHandlers } from './RoomSocketHandler.js';
-import { registerGameHandlers } from './GameSocketHandler.js';
-import { setIO, socketSessions } from './ioState.js';
-import { handleDisconnect } from '../../services/GameEngine.js';
-
-export function setupSocketIO(httpServer: HTTPServer) {
-  const io = new Server(httpServer, {
-    cors: { origin: process.env.CORS_ORIGIN || '*' },
-    pingInterval: 25000,
-    pingTimeout: 20000,
-    transports: ['websocket', 'polling'],
-  });
-
-  // Store in shared state so GameEngine can emit without circular import
-  setIO(io);
-
-  io.on('connection', (socket) => {
-    logger.info(`[SocketHandler] Client connected | socketId=${socket.id}`);
-
-    registerRoomHandlers(io, socket);
-    registerGameHandlers(io, socket);
-
-    socket.on('disconnect', async (reason) => {
-      const session = socketSessions.get(socket.id);
-      if (!session) return;
-      logger.warn(`[SocketHandler] Client disconnected | socketId=${socket.id} reason=${reason} roomCode=${session.roomCode} playerId=${session.playerId}`);
-      await handleDisconnect(socket.id, session);
-      socketSessions.delete(socket.id);
-    });
-  });
-
-  logger.info('[SocketHandler] Socket.io server initialized');
-}
-```
-
-### 2.2 Room Socket Handler
-
-**`src/presentation/handlers/RoomSocketHandler.ts`**:
-```typescript
-import { Server, Socket } from 'socket.io';
-import { v4 as uuid } from 'uuid';
-import { RoomModel } from '../../data/models/RoomModel.js';
-import { assignName } from '../../services/NameGenerator.js';
-import { JoinRoomSchema } from '../validators/socketSchemas.js';
-import { socketSessions } from './ioState.js';
-import { logger } from '../../config/logger.js';
-
-export function registerRoomHandlers(io: Server, socket: Socket) {
-  socket.on('room:join', async (payload: unknown) => {
-    logger.info(`[RoomSocketHandler] room:join received | socketId=${socket.id} payload=${JSON.stringify(payload)}`);
-
-    const parsed = JoinRoomSchema.safeParse(payload);
-    if (!parsed.success) {
-      socket.emit('error', { message: 'Invalid room code format' });
-      return;
-    }
-
-    const { roomCode } = parsed.data;
-    const room = await RoomModel.findOne({ code: roomCode });
-
-    if (!room) {
-      socket.emit('error', { message: 'Кімнату не знайдено' });
-      return;
-    }
-    if (room.status !== 'waiting') {
-      socket.emit('error', { message: 'Гра вже почалась' });
-      return;
-    }
-    if (room.players.length >= room.maxPlayers) {
-      socket.emit('error', { message: 'Кімната заповнена' });
-      return;
-    }
-
-    const { name, color } = assignName(roomCode);
-    const playerId = uuid();
-    // First player to join via socket becomes the creator.
-    // The REST endpoint creates the room with 0 players to avoid duplication.
-    const isCreator = room.players.length === 0;
-
-    room.players.push({ id: playerId, socketId: socket.id, name, color, score: 0, isCreator, joinedAt: new Date(), lastSeen: new Date() });
-    await room.save();
-
-    socketSessions.set(socket.id, { playerId, roomCode });
-    socket.join(roomCode);
-
-    logger.info(`[RoomSocketHandler] Player joined | roomCode=${roomCode} playerId=${playerId} name="${name}" isCreator=${isCreator}`);
-
-    // Tell this socket its own identity (needed for QuizCubit to track "my" answers)
-    socket.emit('room:joined', { playerId, name, color, isCreator });
-
-    // Broadcast updated room state to ALL players in room (including the new one)
-    io.to(roomCode).emit('room:state', buildRoomState(room));
-  });
-}
-
-function buildRoomState(room: any) {
-  return {
-    code: room.code,
-    subject: room.subject,
-    status: room.status,
-    maxPlayers: room.maxPlayers,
-    players: room.players.map((p: any) => ({
-      id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.isCreator,
-    })),
-  };
-}
-```
-
-### 2.3 Game Engine
+### 2.1 Game Engine
 
 **`src/services/GameEngine.ts`**:
 ```typescript
-// Import io from ioState (not from SocketHandler) to avoid circular dependency.
-// SocketHandler → GameEngine → ioState  (no cycle)
-import { io, socketSessions } from '../presentation/handlers/ioState.js';
-import { RoomModel } from '../data/models/RoomModel.js';
-import { QuestionModel } from '../data/models/QuestionModel.js';
+import { broadcastToRoom } from '../config/supabase.js';
+import { getRoom, updateRoom, getPlayers, incrementPlayerScore, deleteRoom } from '../data/repositories/RoomRepository.js';
+import { getRandomQuestions, getQuestionsByIds } from '../data/repositories/QuestionRepository.js';
 import { clearRoom } from './NameGenerator.js';
 import { logger } from '../config/logger.js';
 
 const QUESTION_COUNT = 10;
-const ROUND_TIMER_MS = 5 * 60 * 1000; // 5 minutes
+const ROUND_TIMER_MS = 5 * 60 * 1000; // 5 minutes — reduce temporarily for testing
 const REVEAL_DELAY_MS = 3000;
 const CORRECT_ANSWER_POINTS = 10;
 
 // In-memory: roomCode → { answers: Map<playerId, number|null>, timer: NodeJS.Timeout }
+// This state lives in Node.js — intentional. Keeps game logic server-authoritative.
 const roundState = new Map<string, { answers: Map<string, number | null>; timer: NodeJS.Timeout }>();
 
 export async function startGame(roomCode: string): Promise<void> {
-  const room = await RoomModel.findOne({ code: roomCode });
+  const room = await getRoom(roomCode);
   if (!room || room.status !== 'waiting') return;
 
-  // Sample random questions — order is preserved in questionIds
-  const questions = await QuestionModel.aggregate([
-    { $match: { subject: room.subject } },
-    { $sample: { size: QUESTION_COUNT } },
-  ]);
+  const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
+  const questionIds = questions.map((q) => q.id);
 
-  room.questionIds = questions.map((q) => q._id as string);
-  room.status = 'playing';
-  room.currentQuestionIndex = 0;
-  await room.save();
+  await updateRoom(roomCode, { status: 'playing', question_ids: questionIds, current_question_index: 0 });
 
   logger.info(`[GameEngine] Game started | roomCode=${roomCode} questions=${QUESTION_COUNT}`);
-  io.to(roomCode).emit('game:start', { totalQuestions: QUESTION_COUNT });
+  await broadcastToRoom(roomCode, 'game:start', { totalQuestions: QUESTION_COUNT });
 
   await startRound(roomCode, 0, questions);
 }
 
-async function startRound(roomCode: string, questionIndex: number, questions: any[]) {
-  const room = await RoomModel.findOne({ code: roomCode });
+async function startRound(roomCode: string, questionIndex: number, questions: ReturnType<typeof getRandomQuestions> extends Promise<infer T> ? T : never) {
+  const room = await getRoom(roomCode);
   if (!room || room.status !== 'playing') return;
 
   const questionDoc = questions[questionIndex];
-  room.currentQuestionIndex = questionIndex;
-  room.roundStartedAt = new Date();
-  await room.save();
+  await updateRoom(roomCode, { current_question_index: questionIndex, round_started_at: new Date().toISOString() });
 
-  // Send question WITHOUT correct_answer_index — security critical
+  // SECURITY CRITICAL: strip correct_answer_index before broadcasting
   const clientQuestion = {
-    id: questionDoc._id,
+    id: questionDoc.id,
     subject: questionDoc.subject,
     text: questionDoc.text,
     choices: questionDoc.choices,
   };
 
-  logger.info(`[GameEngine] Round started | roomCode=${roomCode} questionIndex=${questionIndex} questionId=${questionDoc._id}`);
-  io.to(roomCode).emit('question:new', clientQuestion);
+  logger.info(`[GameEngine] Round started | roomCode=${roomCode} questionIndex=${questionIndex} questionId=${questionDoc.id}`);
+  await broadcastToRoom(roomCode, 'question:new', clientQuestion);
 
-  // Initialize answer tracking for all players
+  // Initialize answer tracking for all players in this room
+  const players = await getPlayers(roomCode);
   const answers = new Map<string, number | null>();
-  room.players.forEach((p: any) => answers.set(p.id, null));
+  players.forEach((p) => answers.set(p.id, null));
 
   const timer = setTimeout(() => revealRound(roomCode, questionIndex, questions), ROUND_TIMER_MS);
   roundState.set(roomCode, { answers, timer });
 }
 
-export async function submitAnswer(roomCode: string, playerId: string, questionId: string, answerIndex: number) {
+export async function submitAnswer(roomCode: string, playerId: string, questionId: string, answerIndex: number): Promise<void> {
   const state = roundState.get(roomCode);
-  if (!state || state.answers.get(playerId) !== null) return; // Already answered or no active round
+  if (!state) return;
+  if (state.answers.get(playerId) !== null) return; // already answered
 
-  const room = await RoomModel.findOne({ code: roomCode });
-  if (!room || room.questionIds[room.currentQuestionIndex] !== questionId) return;
+  const room = await getRoom(roomCode);
+  if (!room || room.question_ids[room.current_question_index] !== questionId) return;
 
-  const timeTakenMs = Date.now() - (room.roundStartedAt?.getTime() ?? Date.now());
+  const timeTakenMs = Date.now() - new Date(room.round_started_at ?? Date.now()).getTime();
   state.answers.set(playerId, answerIndex);
   logger.info(`[GameEngine] Answer recv | roomCode=${roomCode} playerId=${playerId} answerIndex=${answerIndex} timeTakenMs=${timeTakenMs}`);
 
-  // Broadcast updated answers (without revealing correct one)
-  io.to(roomCode).emit('round:update', { playerAnswers: Object.fromEntries(state.answers) });
+  await broadcastToRoom(roomCode, 'round:update', { playerAnswers: Object.fromEntries(state.answers) });
 
-  // Check if all active players answered
-  const room2 = await RoomModel.findOne({ code: roomCode });
-  const activePlayers = room2!.players.filter((p: any) => p.socketId);
-  const allAnswered = activePlayers.every((p: any) => state.answers.get(p.id) !== null);
+  // Check if all active players have answered → early reveal
+  const players = await getPlayers(roomCode);
+  const allAnswered = players.every((p) => state.answers.get(p.id) !== null);
   if (allAnswered) {
     clearTimeout(state.timer);
-    // IMPORTANT: use fetchQuestions which preserves questionIds order (not sorted by _id)
-    const questions = await fetchQuestionsOrdered(room2!.questionIds);
-    await revealRound(roomCode, room2!.currentQuestionIndex, questions);
+    const questions = await fetchQuestionsOrdered(room.question_ids);
+    await revealRound(roomCode, room.current_question_index, questions);
   }
 }
 
-async function revealRound(roomCode: string, questionIndex: number, questions: any[]) {
+async function revealRound(
+  roomCode: string,
+  questionIndex: number,
+  questions: Awaited<ReturnType<typeof getQuestionsByIds>>,
+) {
   const state = roundState.get(roomCode);
-  const room = await RoomModel.findOne({ code: roomCode });
-  if (!room || !state) return;
+  if (!state) return;
 
   const questionDoc = questions[questionIndex];
   const correctIndex = questionDoc.correct_answer_index;
@@ -751,17 +792,20 @@ async function revealRound(roomCode: string, questionIndex: number, questions: a
   }
 
   // Update scores
+  const players = await getPlayers(roomCode);
   const scores: Record<string, number> = {};
-  for (const player of room.players) {
-    const answer = state.answers.get(player.id as string);
-    const isCorrect = answer === correctIndex;
-    if (isCorrect) player.score += CORRECT_ANSWER_POINTS;
-    scores[player.id as string] = player.score;
+  for (const player of players) {
+    const answer = state.answers.get(player.id);
+    if (answer === correctIndex) {
+      await incrementPlayerScore(roomCode, player.id, CORRECT_ANSWER_POINTS);
+      scores[player.id] = player.score + CORRECT_ANSWER_POINTS;
+    } else {
+      scores[player.id] = player.score;
+    }
   }
-  await room.save();
 
   logger.info(`[GameEngine] Round reveal | roomCode=${roomCode} correctIndex=${correctIndex} scores=${JSON.stringify(scores)}`);
-  io.to(roomCode).emit('round:reveal', {
+  await broadcastToRoom(roomCode, 'round:reveal', {
     correctIndex,
     playerAnswers: Object.fromEntries(state.answers),
     scores,
@@ -769,128 +813,80 @@ async function revealRound(roomCode: string, questionIndex: number, questions: a
 
   roundState.delete(roomCode);
 
-  // Advance to next question after delay
   setTimeout(async () => {
     if (questionIndex + 1 >= QUESTION_COUNT) {
-      await endGame(roomCode, room.players);
+      await endGame(roomCode);
     } else {
-      await startRound(roomCode, questionIndex + 1, questions);
+      const updatedQuestions = await fetchQuestionsOrdered(questions.map((q) => q.id));
+      await startRound(roomCode, questionIndex + 1, updatedQuestions);
     }
   }, REVEAL_DELAY_MS);
 }
 
-async function endGame(roomCode: string, players: any[]) {
-  await RoomModel.updateOne({ code: roomCode }, { $set: { status: 'finished' } });
+async function endGame(roomCode: string) {
+  await updateRoom(roomCode, { status: 'finished' });
+  const players = await getPlayers(roomCode);
 
   const scoreboard = [...players]
     .sort((a, b) => b.score - a.score)
     .map((p, i) => ({ rank: i + 1, id: p.id, name: p.name, color: p.color, score: p.score }));
 
   logger.info(`[GameEngine] Game ended | roomCode=${roomCode} scoreboard=${JSON.stringify(scoreboard)}`);
-  io.to(roomCode).emit('game:end', { scoreboard });
+  await broadcastToRoom(roomCode, 'game:end', { scoreboard });
+
+  // Schedule room cleanup after 1 hour
+  setTimeout(async () => {
+    await deleteRoom(roomCode);
+    clearRoom(roomCode);
+    logger.info(`[GameEngine] Room cleaned up | roomCode=${roomCode}`);
+  }, 60 * 60 * 1000);
 }
 
-// Returns questions in the SAME ORDER as questionIds (the original $sample order).
-// Do NOT use .sort({_id:1}) — that would change the order and cause wrong correct_answer_index lookups.
+// Preserves the original random order from startGame (do NOT sort by id)
 async function fetchQuestionsOrdered(questionIds: string[]) {
-  const docs = await QuestionModel.find({ _id: { $in: questionIds } }).lean();
-  const docMap = new Map(docs.map((d) => [d._id as string, d]));
+  const docs = await getQuestionsByIds(questionIds);
+  const docMap = new Map(docs.map((d) => [d.id, d]));
   return questionIds.map((id) => docMap.get(id)!);
-}
-
-export async function handleDisconnect(socketId: string, session: { playerId: string; roomCode: string }) {
-  const { playerId, roomCode } = session;
-  const room = await RoomModel.findOne({ code: roomCode });
-  if (!room) return;
-
-  const player = room.players.find((p: any) => p.id === playerId);
-  if (player) {
-    player.socketId = '';
-    player.lastSeen = new Date();
-  }
-
-  // If all players gone, schedule room cleanup
-  const anyConnected = room.players.some((p: any) => p.socketId !== '');
-  if (!anyConnected) {
-    setTimeout(async () => {
-      const r = await RoomModel.findOne({ code: roomCode });
-      if (r && !r.players.some((p: any) => p.socketId !== '')) {
-        await RoomModel.deleteOne({ code: roomCode });
-        clearRoom(roomCode); // free in-memory name tracking
-        logger.info(`[GameEngine] Room cleaned up | roomCode=${roomCode}`);
-      }
-    }, 60_000);
-  }
-
-  // Assign creator to next player if creator disconnected
-  if (player?.isCreator) {
-    const nextPlayer = room.players.find((p: any) => p.id !== playerId && p.socketId !== '');
-    if (nextPlayer) {
-      player.isCreator = false;
-      nextPlayer.isCreator = true;
-      logger.info(`[GameEngine] Creator reassigned | roomCode=${roomCode} newCreator=${nextPlayer.id}`);
-    }
-  }
-
-  await room.save();
-
-  io.to(roomCode).emit('player:disconnected', { playerId });
-  logger.warn(`[RoomService] Player disc. | roomCode=${roomCode} playerId=${playerId}`);
-
-  // If mid-game and all remaining players answered, trigger early reveal
-  const state = roundState.get(roomCode);
-  if (state && room.status === 'playing') {
-    const stillActive = room.players.filter((p: any) => p.socketId !== '');
-    const allAnswered = stillActive.every((p: any) => state.answers.get(p.id) !== null);
-    if (allAnswered && stillActive.length > 0) {
-      clearTimeout(state.timer);
-      const questions = await fetchQuestionsOrdered(room.questionIds);
-      await revealRound(roomCode, room.currentQuestionIndex, questions);
-    }
-  }
 }
 ```
 
-### 2.4 Game Socket Handler
+### 2.2 Game Controller (REST handlers for start + answer)
 
-**`src/presentation/handlers/GameSocketHandler.ts`**:
+**`src/presentation/controllers/GameController.ts`**:
 ```typescript
-import { Server, Socket } from 'socket.io';
-import { socketSessions } from './ioState.js';
+import { Request, Response } from 'express';
+import { getRoom, getPlayers } from '../../data/repositories/RoomRepository.js';
 import { startGame, submitAnswer } from '../../services/GameEngine.js';
-import { SubmitAnswerSchema } from '../validators/socketSchemas.js';
-import { RoomModel } from '../../data/models/RoomModel.js';
+import { StartGameSchema, SubmitAnswerSchema } from '../validators/requestSchemas.js';
 import { logger } from '../../config/logger.js';
 
-export function registerGameHandlers(io: Server, socket: Socket) {
-  socket.on('game:start', async () => {
-    const session = socketSessions.get(socket.id);
-    if (!session) return;
+export async function startGame(req: Request, res: Response) {
+  const code = req.params.code.toUpperCase();
+  const parsed = StartGameSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-    const room = await RoomModel.findOne({ code: session.roomCode });
-    const player = room?.players.find((p: any) => p.id === session.playerId);
-    if (!player?.isCreator) {
-      socket.emit('error', { message: 'Тільки творець може почати гру' });
-      return;
-    }
+  const room = await getRoom(code);
+  if (!room) return res.status(404).json({ error: 'Кімнату не знайдено' });
+  if (room.status !== 'waiting') return res.status(400).json({ error: 'Гра вже почалась' });
 
-    logger.info(`[GameSocketHandler] game:start received | roomCode=${session.roomCode}`);
-    await startGame(session.roomCode);
-  });
+  const players = await getPlayers(code);
+  const player = players.find((p) => p.id === parsed.data.playerId);
+  if (!player?.is_creator) return res.status(403).json({ error: 'Тільки творець може почати гру' });
 
-  socket.on('player:answer', async (payload: unknown) => {
-    const session = socketSessions.get(socket.id);
-    if (!session) return;
+  logger.info(`[GameController] game:start | roomCode=${code} playerId=${parsed.data.playerId}`);
+  await startGame(code);
+  res.json({ ok: true });
+}
 
-    const parsed = SubmitAnswerSchema.safeParse(payload);
-    if (!parsed.success) {
-      socket.emit('error', { message: 'Invalid answer format' });
-      return;
-    }
+export async function submitAnswer(req: Request, res: Response) {
+  const code = req.params.code.toUpperCase();
+  const parsed = SubmitAnswerSchema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: parsed.error.flatten() });
 
-    logger.info(`[GameSocketHandler] player:answer received | roomCode=${session.roomCode} playerId=${session.playerId} answerIndex=${parsed.data.answerIndex}`);
-    await submitAnswer(session.roomCode, session.playerId, parsed.data.questionId, parsed.data.answerIndex);
-  });
+  const { playerId, questionId, answerIndex } = parsed.data;
+  logger.info(`[GameController] answer | roomCode=${code} playerId=${playerId} answerIndex=${answerIndex}`);
+  await submitAnswer(code, playerId, questionId, answerIndex);
+  res.json({ ok: true });
 }
 ```
 
@@ -898,162 +894,233 @@ export function registerGameHandlers(io: Server, socket: Socket) {
 
 ### ✅ Phase 2 Gate Check
 
-Start the backend server (`cd backend && npm run dev`), then test the full Socket.io flow manually using two browser console sessions, or write a quick Node.js test script:
+Start the backend (`cd backend && npm run dev`), then test the full REST + Supabase Realtime flow with a Node.js test script.
 
-```typescript
-// test_socket.mjs — run with: node test_socket.mjs
-// Tests: join → room:joined identity → lobby → game:start (both directions) → question → answer → round:update → round:reveal
-import { io } from 'socket.io-client';
-
-const ROOM_CODE = 'A9X'; // replace with a code from Phase 1 gate check
-
-const s1 = io('http://localhost:3000');
-const s2 = io('http://localhost:3000');
-
-let s1PlayerId = null;
-let s1RoomJoined = false;
-
-// ── s1 (creator — first to join) ─────────────────────────────
-s1.on('connect', () => {
-  console.log('[s1] connected');
-  s1.emit('room:join', { roomCode: ROOM_CODE });
-});
-
-s1.on('room:joined', (data) => {
-  s1PlayerId = data.playerId;
-  console.log('[s1] room:joined ✅ | playerId=' + data.playerId + ' name=' + data.name + ' isCreator=' + data.isCreator);
-  if (!data.isCreator) console.error('[s1] ERROR: s1 should be creator but isCreator=false!');
-  s1RoomJoined = true;
-});
-
-s1.on('room:state', (data) => {
-  console.log('[s1] room:state | players=' + data.players.length);
-  // Once both players have joined, s1 (creator) starts the game
-  if (data.players.length === 2 && s1RoomJoined) {
-    console.log('[s1] Both players in lobby — emitting game:start');
-    s1.emit('game:start', {});
-  }
-});
-
-// game:start is also broadcast server→all once game begins
-s1.on('game:start', (data) => {
-  console.log('[s1] game:start received ✅ | totalQuestions=' + data.totalQuestions);
-});
-
-s1.on('question:new', (q) => {
-  const hasCorrect = 'correct_answer_index' in q;
-  console.log('[s1] question:new ✅ | id=' + q.id + ' has correct_answer_index? ' + hasCorrect);
-  if (hasCorrect) console.error('[s1] SECURITY VIOLATION: correct_answer_index exposed in question:new!');
-  s1.emit('player:answer', { questionId: q.id, answerIndex: 0 });
-});
-
-s1.on('round:update', (data) => {
-  // Fires after each player answers — shows partial results before all have answered
-  console.log('[s1] round:update ✅ | playerAnswers=' + JSON.stringify(data.playerAnswers));
-});
-
-s1.on('round:reveal', (data) => {
-  console.log('[s1] round:reveal ✅ | correctIndex=' + data.correctIndex + ' scores=' + JSON.stringify(data.scores));
-  console.log('[s1] All checks passed — exiting');
-  process.exit(0);
-});
-
-// ── s2 (second player — not creator) ─────────────────────────
-s2.on('connect', () => {
-  console.log('[s2] connected');
-  s2.emit('room:join', { roomCode: ROOM_CODE });
-});
-
-s2.on('room:joined', (data) => {
-  console.log('[s2] room:joined ✅ | playerId=' + data.playerId + ' name=' + data.name + ' isCreator=' + data.isCreator);
-  if (data.isCreator) console.error('[s2] ERROR: s2 should NOT be creator but isCreator=true!');
-});
-
-s2.on('question:new', (q) => {
-  s2.emit('player:answer', { questionId: q.id, answerIndex: 1 });
-});
-
-setTimeout(() => { console.error('TIMEOUT: test did not complete in 30s'); process.exit(1); }, 30000);
+**Install test dependencies (one-time):**
+```bash
+npm install -g @supabase/supabase-js  # or use: node --input-type=module
+# or just run: node test_game.mjs (it uses dynamic import)
 ```
 
+```javascript
+// test_game.mjs — run with: node test_game.mjs
+// Tests: create room → join (2 players) → game:start → question:new (security check) → answer → round:update → round:reveal
+import { createClient } from '@supabase/supabase-js';
+
+const BASE = 'http://localhost:3000';
+const SUPABASE_URL = process.env.SUPABASE_URL;   // same as in backend/.env
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY; // anon key (NOT service key)
+
+const post = (path, body) => fetch(`${BASE}${path}`, {
+  method: 'POST', headers: { 'Content-Type': 'application/json' },
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => r.json());
+
+// Step 1: Create room
+const { code } = await post('/api/rooms', { subject: 'history', maxPlayers: 2 });
+console.log('Room created ✅ | code=' + code);
+
+// Step 2: Two players join
+const p1 = await post(`/api/rooms/${code}/join`);
+console.log('P1 joined ✅ | playerId=' + p1.playerId + ' isCreator=' + p1.isCreator);
+if (!p1.isCreator) { console.error('ERROR: p1 should be creator!'); process.exit(1); }
+
+const p2 = await post(`/api/rooms/${code}/join`);
+console.log('P2 joined ✅ | playerId=' + p2.playerId + ' isCreator=' + p2.isCreator);
+if (p2.isCreator) { console.error('ERROR: p2 should NOT be creator!'); process.exit(1); }
+
+// Step 3: Subscribe to Supabase Realtime channel (both players share one subscription for test)
+const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+let receivedGameStart = false, receivedQuestion = false, receivedRoundUpdate = false;
+
+const channel = supabase.channel(`room:${code}`)
+  .on('broadcast', { event: 'game:start' }, ({ payload }) => {
+    console.log('game:start ✅ | totalQuestions=' + payload.totalQuestions);
+    receivedGameStart = true;
+  })
+  .on('broadcast', { event: 'question:new' }, ({ payload }) => {
+    const hasCorrect = 'correct_answer_index' in payload;
+    console.log('question:new ✅ | id=' + payload.id + ' has correct_answer_index? ' + hasCorrect);
+    if (hasCorrect) { console.error('SECURITY VIOLATION: correct_answer_index in question:new!'); process.exit(1); }
+    receivedQuestion = true;
+    // Both players answer immediately
+    post(`/api/rooms/${code}/answer`, { playerId: p1.playerId, questionId: payload.id, answerIndex: 0 });
+    post(`/api/rooms/${code}/answer`, { playerId: p2.playerId, questionId: payload.id, answerIndex: 1 });
+  })
+  .on('broadcast', { event: 'round:update' }, ({ payload }) => {
+    console.log('round:update ✅ | playerAnswers=' + JSON.stringify(payload.playerAnswers));
+    receivedRoundUpdate = true;
+  })
+  .on('broadcast', { event: 'round:reveal' }, ({ payload }) => {
+    console.log('round:reveal ✅ | correctIndex=' + payload.correctIndex + ' scores=' + JSON.stringify(payload.scores));
+    console.log('All Phase 2 checks passed ✅');
+    channel.unsubscribe();
+    process.exit(0);
+  })
+  .subscribe();
+
+// Step 4: Creator starts game
+await post(`/api/rooms/${code}/start`, { playerId: p1.playerId });
+console.log('game:start sent ✅');
+
+setTimeout(() => { console.error('TIMEOUT: test did not complete in 15s'); process.exit(1); }, 15000);
+```
+
+Run: `SUPABASE_URL=... SUPABASE_ANON_KEY=... node test_game.mjs`
+
 Checklist before moving on:
-- [ ] `room:joined` fires on join with `{ playerId, name, color, isCreator }` — only to the joining socket
-- [ ] First socket to join has `isCreator: true`; second has `isCreator: false`
-- [ ] Two players can join the same room (both see `room:state` with 2 players)
-- [ ] `game:start` (client→server) triggers game; `game:start` (server→all) broadcasts `{ totalQuestions: 10 }`
+- [ ] `POST /api/rooms` returns `{ code }` (3-char)
+- [ ] First `POST /api/rooms/:code/join` → `isCreator: true`; second → `isCreator: false`
+- [ ] `POST /api/rooms/:code/start` by creator → Supabase broadcasts `game:start` + first `question:new`
 - [ ] `question:new` payload does **NOT** contain `correct_answer_index`
-- [ ] `round:update` fires with `{ playerAnswers }` after each player answers (before all answered)
+- [ ] `round:update` fires after each player answers (partial results visible)
 - [ ] `round:reveal` fires when all players answer — contains `correctIndex`, `playerAnswers`, `scores`
-- [ ] `round:reveal` fires after 5-minute timer (temporarily reduce `ROUND_TIMER_MS` for testing)
-- [ ] Disconnecting a player broadcasts `player:disconnected` to remaining players
+- [ ] `round:reveal` fires after timer if not all players answered (temporarily reduce `ROUND_TIMER_MS = 5000` for testing)
+- [ ] Non-creator calling `POST /api/rooms/:code/start` → `403` error
 
 ---
 
 ## Phase 3 — Flutter Frontend
 
-### 3.1 SocketService
+### 3.1 SupabaseService + ApiService
 
-**`lib/services/socket_service.dart`**:
+> **No `socket_io_client`.** Flutter subscribes to Supabase Realtime Broadcast for server events. REST calls go to Node.js via `http` package.
+
+**`lib/services/supabase_service.dart`**:
 ```dart
 import 'dart:async';
 import 'package:logger/logger.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
-// roomJoined: server sends this only to the joining socket — tells you your own playerId/name/color
-enum SocketEventType { roomJoined, roomState, gameStart, questionNew, roundUpdate, roundReveal, gameEnd, playerDisconnected, error }
+// Server→client event types (all delivered via Supabase Realtime Broadcast)
+enum RealtimeEventType { roomState, gameStart, questionNew, roundUpdate, roundReveal, gameEnd, playerDisconnected }
 
-class SocketEvent {
-  final SocketEventType type;
+class RealtimeEvent {
+  final RealtimeEventType type;
   final Map<String, dynamic> data;
-  const SocketEvent(this.type, this.data);
+  const RealtimeEvent(this.type, this.data);
 }
 
-class SocketService {
-  late io.Socket socket;
+class SupabaseService {
   final Logger logger;
-  final _controller = StreamController<SocketEvent>.broadcast();
+  final _controller = StreamController<RealtimeEvent>.broadcast();
+  RealtimeChannel? _channel;
 
-  Stream<SocketEvent> get events => _controller.stream;
+  Stream<RealtimeEvent> get events => _controller.stream;
 
-  SocketService({required this.logger});
+  SupabaseService({required this.logger});
 
-  void connect(String serverUrl) {
-    socket = io.io(serverUrl, io.OptionBuilder()
-      .setTransports(['websocket'])
-      .enableReconnection()
-      .setReconnectionAttempts(5)
-      .setReconnectionDelay(1000)
-      .build());
-
-    socket.onConnect((_) => logger.i('[SocketService] connected | url=$serverUrl'));
-    socket.onDisconnect((_) => logger.w('[SocketService] disconnected'));
-    socket.onConnectError((e) => logger.e('[SocketService] ERROR connect failed | err=$e'));
-    socket.onReconnecting((attempt) => logger.i('[SocketService] reconnecting... | attempt=$attempt'));
-
-    socket.on('room:joined',        (d) => _emit(SocketEventType.roomJoined, d));
-    socket.on('room:state',         (d) => _emit(SocketEventType.roomState, d));
-    socket.on('game:start',         (d) => _emit(SocketEventType.gameStart, d));
-    socket.on('question:new',       (d) => _emit(SocketEventType.questionNew, d));
-    socket.on('round:update',       (d) => _emit(SocketEventType.roundUpdate, d));
-    socket.on('round:reveal',       (d) => _emit(SocketEventType.roundReveal, d));
-    socket.on('game:end',           (d) => _emit(SocketEventType.gameEnd, d));
-    socket.on('player:disconnected',(d) => _emit(SocketEventType.playerDisconnected, d));
-    socket.on('error',              (d) => _emit(SocketEventType.error, d));
+  static Future<void> initialize() async {
+    await Supabase.initialize(
+      url: const String.fromEnvironment('SUPABASE_URL'),
+      anonKey: const String.fromEnvironment('SUPABASE_ANON_KEY'),
+    );
   }
 
-  void _emit(SocketEventType type, dynamic data) {
-    logger.i('[SocketService] event received | type=${type.name} data=$data');
-    _controller.add(SocketEvent(type, Map<String, dynamic>.from(data ?? {})));
+  void subscribeToRoom(String roomCode) {
+    logger.i('[SupabaseService] subscribing to room:$roomCode');
+    _channel = Supabase.instance.client.channel('room:$roomCode')
+      .onBroadcast(event: 'room:state',          callback: (p) => _emit(RealtimeEventType.roomState, p))
+      .onBroadcast(event: 'game:start',          callback: (p) => _emit(RealtimeEventType.gameStart, p))
+      .onBroadcast(event: 'question:new',        callback: (p) {
+        if (p.containsKey('correct_answer_index')) {
+          logger.e('[SupabaseService] SECURITY VIOLATION: correct_answer_index in question:new!');
+        }
+        _emit(RealtimeEventType.questionNew, p);
+      })
+      .onBroadcast(event: 'round:update',        callback: (p) => _emit(RealtimeEventType.roundUpdate, p))
+      .onBroadcast(event: 'round:reveal',        callback: (p) => _emit(RealtimeEventType.roundReveal, p))
+      .onBroadcast(event: 'game:end',            callback: (p) => _emit(RealtimeEventType.gameEnd, p))
+      .onBroadcast(event: 'player:disconnected', callback: (p) => _emit(RealtimeEventType.playerDisconnected, p))
+      .subscribe((status, err) {
+        if (status == RealtimeSubscribeStatus.subscribed) {
+          logger.i('[SupabaseService] subscribed to room:$roomCode');
+        } else if (err != null) {
+          logger.e('[SupabaseService] ERROR subscription | err=$err');
+        }
+      });
   }
 
-  void emit(String event, Map<String, dynamic> data) {
-    logger.i('[SocketService] emit | event=$event data=$data');
-    socket.emit(event, data);
+  void _emit(RealtimeEventType type, Map<String, dynamic> data) {
+    logger.i('[SupabaseService] event | type=${type.name}');
+    _controller.add(RealtimeEvent(type, data));
+  }
+
+  void unsubscribe() {
+    _channel?.unsubscribe();
+    _channel = null;
+    logger.i('[SupabaseService] unsubscribed');
   }
 
   void dispose() {
-    socket.dispose();
+    unsubscribe();
     _controller.close();
+  }
+}
+```
+
+**`lib/services/api_service.dart`**:
+```dart
+import 'dart:convert';
+import 'package:http/http.dart' as http;
+import 'package:logger/logger.dart';
+
+/// Handles all client→server REST calls to the Node.js backend.
+class ApiService {
+  final String baseUrl;
+  final Logger logger;
+
+  ApiService({required this.logger})
+    : baseUrl = const String.fromEnvironment('API_URL', defaultValue: 'http://localhost:3000');
+
+  Future<Map<String, dynamic>> createRoom(String subject, int maxPlayers) async {
+    logger.i('[ApiService] POST /api/rooms | subject=$subject maxPlayers=$maxPlayers');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'subject': subject, 'maxPlayers': maxPlayers}),
+    );
+    if (res.statusCode != 201) throw Exception('createRoom failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+    // Returns: { code: 'A9X' }
+  }
+
+  Future<Map<String, dynamic>> joinRoom(String roomCode) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/join');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/join'),
+      headers: {'Content-Type': 'application/json'},
+    );
+    if (res.statusCode != 200) throw Exception('joinRoom failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+    // Returns: { playerId, name, color, isCreator }
+  }
+
+  Future<void> startGame(String roomCode, String playerId) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/start | playerId=$playerId');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/start'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId}),
+    );
+    if (res.statusCode != 200) throw Exception('startGame failed: ${res.body}');
+  }
+
+  Future<void> submitAnswer(String roomCode, String playerId, String questionId, int answerIndex) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/answer | playerId=$playerId answerIndex=$answerIndex');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/answer'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId, 'questionId': questionId, 'answerIndex': answerIndex}),
+    );
+    if (res.statusCode != 200) throw Exception('submitAnswer failed: ${res.body}');
+  }
+
+  Future<List<Map<String, dynamic>>> getSubjects() async {
+    final res = await http.get(Uri.parse('$baseUrl/api/subjects'));
+    if (res.statusCode != 200) throw Exception('getSubjects failed: ${res.body}');
+    final data = jsonDecode(res.body) as Map<String, dynamic>;
+    return List<Map<String, dynamic>>.from(data['subjects'] as List);
   }
 }
 ```
@@ -1180,56 +1247,70 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:logger/logger.dart';
 import '../../../data/models/player_model.dart';
-import '../../../services/socket_service.dart';
+import '../../../services/supabase_service.dart';
+import '../../../services/api_service.dart';
 import 'room_state.dart';
 
 class RoomCubit extends Cubit<RoomState> {
-  final SocketService socketService;
+  final SupabaseService supabaseService;
+  final ApiService apiService;
   final Logger logger;
-  late StreamSubscription<SocketEvent> _sub;
+  late StreamSubscription<RealtimeEvent> _sub;
 
-  // Populated on room:joined — used by QuizCubit to identify "my" answers
+  // Set on joinRoom() response — used by QuizCubit to identify "my" answers
   String? myPlayerId;
+  String? myName;
+  bool myIsCreator = false;
 
-  RoomCubit({required this.socketService, required this.logger}) : super(const RoomState()) {
-    _sub = socketService.events.listen(_handleEvent);
+  RoomCubit({required this.supabaseService, required this.apiService, required this.logger})
+      : super(const RoomState()) {
+    _sub = supabaseService.events.listen(_handleEvent);
   }
 
-  void joinRoom(String roomCode) {
+  Future<void> joinRoom(String roomCode) async {
     logger.i('[RoomCubit] joining room | roomCode=$roomCode');
-    socketService.emit('room:join', {'roomCode': roomCode.toUpperCase()});
+    try {
+      // Subscribe to Supabase Realtime BEFORE calling REST join,
+      // so we don't miss the room:state broadcast that fires on join.
+      supabaseService.subscribeToRoom(roomCode.toUpperCase());
+
+      final result = await apiService.joinRoom(roomCode);
+      myPlayerId = result['playerId'] as String;
+      myName = result['name'] as String;
+      myIsCreator = result['isCreator'] as bool? ?? false;
+      logger.i('[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator');
+    } catch (e) {
+      logger.e('[RoomCubit] joinRoom failed | err=$e');
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
+    }
   }
 
-  void startGame() {
-    logger.i('[RoomCubit] emitting game:start');
-    socketService.emit('game:start', {});
+  Future<void> startGame() async {
+    if (myPlayerId == null) return;
+    logger.i('[RoomCubit] starting game | roomCode=${state.code}');
+    try {
+      await apiService.startGame(state.code, myPlayerId!);
+    } catch (e) {
+      logger.e('[RoomCubit] startGame failed | err=$e');
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
+    }
   }
 
-  void _handleEvent(SocketEvent event) {
+  void _handleEvent(RealtimeEvent event) {
     switch (event.type) {
-      case SocketEventType.roomJoined:
-        // Only this socket receives this — tells us our own identity
-        myPlayerId = event.data['playerId'] as String?;
-        logger.i('[RoomCubit] room:joined | myPlayerId=$myPlayerId name=${event.data['name']}');
-        break;
-      case SocketEventType.roomState:
+      case RealtimeEventType.roomState:
         _handleRoomState(event.data);
         break;
-      case SocketEventType.gameStart:
+      case RealtimeEventType.gameStart:
         logger.i('[RoomCubit] game:start received | transitioning to playing');
         emit(state.copyWith(status: RoomStatus.playing));
         break;
-      case SocketEventType.playerDisconnected:
+      case RealtimeEventType.playerDisconnected:
         final playerId = event.data['playerId'] as String?;
         logger.w('[RoomCubit] player disconnected | playerId=$playerId');
         if (playerId != null) {
           emit(state.copyWith(players: state.players.where((p) => p.id != playerId).toList()));
         }
-        break;
-      case SocketEventType.error:
-        final msg = event.data['message'] as String? ?? 'Невідома помилка';
-        logger.e('[RoomCubit] ERROR received | message=$msg');
-        emit(state.copyWith(status: RoomStatus.error, errorMessage: msg));
         break;
       default:
         break;
@@ -1246,7 +1327,7 @@ class RoomCubit extends Cubit<RoomState> {
       'finished' => RoomStatus.finished,
       _          => RoomStatus.waiting,
     };
-    logger.i('[RoomCubit] room:state updated | status=$statusStr players=${players.length} currentQ=${data['currentQuestionIndex'] ?? 0}/${data['totalQuestions'] ?? 10}');
+    logger.i('[RoomCubit] room:state | status=$statusStr players=${players.length}');
     emit(state.copyWith(
       code: data['code'] as String? ?? state.code,
       subject: data['subject'] as String? ?? state.subject,
@@ -1259,6 +1340,7 @@ class RoomCubit extends Cubit<RoomState> {
   @override
   Future<void> close() {
     _sub.cancel();
+    supabaseService.unsubscribe();
     return super.close();
   }
 }
@@ -1334,41 +1416,48 @@ import 'dart:async';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:logger/logger.dart';
 import '../../../data/models/question_model.dart';
-import '../../../services/socket_service.dart';
+import '../../../services/supabase_service.dart';
+import '../../../services/api_service.dart';
 import 'quiz_state.dart';
 
 class QuizCubit extends Cubit<QuizState> {
-  final SocketService socketService;
+  final SupabaseService supabaseService;
+  final ApiService apiService;
   final Logger logger;
-  late StreamSubscription<SocketEvent> _sub;
+  late StreamSubscription<RealtimeEvent> _sub;
   Timer? _timer;
   ClientQuestion? _currentQuestion;
   String? _myPlayerId;
+  String? _roomCode;
   int _questionIndex = 0;
   int _totalQuestions = 10;
 
-  QuizCubit({required this.socketService, required this.logger}) : super(const QuizInitial()) {
-    _sub = socketService.events.listen(_handleEvent);
+  QuizCubit({required this.supabaseService, required this.apiService, required this.logger})
+      : super(const QuizInitial()) {
+    _sub = supabaseService.events.listen(_handleEvent);
   }
 
-  void setMyPlayerId(String id) => _myPlayerId = id;
+  void setContext(String myPlayerId, String roomCode) {
+    _myPlayerId = myPlayerId;
+    _roomCode = roomCode;
+  }
 
-  void _handleEvent(SocketEvent event) {
+  void _handleEvent(RealtimeEvent event) {
     switch (event.type) {
-      case SocketEventType.gameStart:
+      case RealtimeEventType.gameStart:
         _totalQuestions = event.data['totalQuestions'] as int? ?? 10;
         _questionIndex = 0;
         break;
-      case SocketEventType.questionNew:
+      case RealtimeEventType.questionNew:
         _handleNewQuestion(event.data);
         break;
-      case SocketEventType.roundUpdate:
+      case RealtimeEventType.roundUpdate:
         _handleRoundUpdate(event.data);
         break;
-      case SocketEventType.roundReveal:
+      case RealtimeEventType.roundReveal:
         _handleReveal(event.data);
         break;
-      case SocketEventType.gameEnd:
+      case RealtimeEventType.gameEnd:
         logger.i('[QuizCubit] game ended | scoreboard=${event.data['scoreboard']}');
         _timer?.cancel();
         emit(QuizGameEnded(scoreboard: List<Map<String, dynamic>>.from(event.data['scoreboard'] as List)));
@@ -1389,7 +1478,6 @@ class QuizCubit extends Cubit<QuizState> {
       totalQuestions: _totalQuestions,
       timeRemaining: const Duration(minutes: 5),
     ));
-
     _startTimer();
   }
 
@@ -1429,12 +1517,14 @@ class QuizCubit extends Cubit<QuizState> {
     ));
   }
 
-  void submitAnswer(int answerIndex) {
+  Future<void> submitAnswer(int answerIndex) async {
     final s = state;
-    if (s is! QuizQuestion) return;
+    if (s is! QuizQuestion || _myPlayerId == null || _roomCode == null) return;
     logger.i('[QuizCubit] answer submitted | questionId=${s.question.id} selectedIndex=$answerIndex');
-    socketService.emit('player:answer', {'questionId': s.question.id, 'answerIndex': answerIndex});
+    // Optimistic UI update — lock button immediately
     emit(s.copyWith(myAnswer: answerIndex));
+    // Send to Node.js REST (not via Supabase — server must validate)
+    await apiService.submitAnswer(_roomCode!, _myPlayerId!, s.question.id, answerIndex);
   }
 
   @override
@@ -1481,38 +1571,27 @@ class GameError extends GameState {
 
 **`lib/presentation/cubits/game_cubit/game_cubit.dart`**:
 ```dart
-import 'dart:convert';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
+import '../../../services/api_service.dart';
 import 'game_state.dart';
 
 class GameCubit extends Cubit<GameState> {
-  final String apiUrl;
+  final ApiService apiService;
   final Logger logger;
 
-  GameCubit({required this.apiUrl, required this.logger}) : super(const GameInitial());
+  GameCubit({required this.apiService, required this.logger}) : super(const GameInitial());
 
   Future<void> createRoom(String subject, int maxPlayers) async {
     emit(const GameCreating());
     try {
-      final response = await http.post(
-        Uri.parse('$apiUrl/api/rooms'),
-        headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'subject': subject, 'maxPlayers': maxPlayers}),
-      );
-      if (response.statusCode == 201) {
-        final data = jsonDecode(response.body) as Map<String, dynamic>;
-        final code = data['code'] as String;
-        logger.i('[GameCubit] room created | code=$code');
-        emit(GameCreated(code));
-      } else {
-        logger.e('[GameCubit] ERROR create room failed | status=${response.statusCode} body=${response.body}');
-        emit(const GameError('Не вдалося створити кімнату'));
-      }
+      final data = await apiService.createRoom(subject, maxPlayers);
+      final code = data['code'] as String;
+      logger.i('[GameCubit] room created | code=$code');
+      emit(GameCreated(code));
     } catch (e) {
-      logger.e('[GameCubit] ERROR network exception | err=$e');
-      emit(const GameError('Помилка мережі'));
+      logger.e('[GameCubit] ERROR create room failed | err=$e');
+      emit(const GameError('Не вдалося створити кімнату'));
     }
   }
 }
@@ -1554,26 +1633,29 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:logger/logger.dart';
 import 'config/router.dart';
-import 'services/socket_service.dart';
+import 'services/supabase_service.dart';
+import 'services/api_service.dart';
 import 'presentation/cubits/room_cubit/room_cubit.dart';
 import 'presentation/cubits/quiz_cubit/quiz_cubit.dart';
 import 'presentation/cubits/game_cubit/game_cubit.dart';
 
-const _apiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://localhost:3000');
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
 
-void main() {
+  // Initialize Supabase (reads SUPABASE_URL + SUPABASE_ANON_KEY from --dart-define)
+  await SupabaseService.initialize();
+
   final logger = Logger();
-  final socketService = SocketService(logger: logger);
-  socketService.connect(_apiUrl);
+  final supabaseService = SupabaseService(logger: logger);
+  final apiService     = ApiService(logger: logger);
 
-  final roomCubit  = RoomCubit(socketService: socketService, logger: logger);
-  final quizCubit  = QuizCubit(socketService: socketService, logger: logger);
+  final roomCubit = RoomCubit(supabaseService: supabaseService, apiService: apiService, logger: logger);
+  final quizCubit = QuizCubit(supabaseService: supabaseService, apiService: apiService, logger: logger);
 
-  // When RoomCubit gets room:joined, forward myPlayerId to QuizCubit so it
-  // can track "my" answer vs others' answers in reveal state.
+  // Forward playerId + roomCode to QuizCubit after join so it can track "my" answer
   roomCubit.stream.listen((_) {
-    if (roomCubit.myPlayerId != null) {
-      quizCubit.setMyPlayerId(roomCubit.myPlayerId!);
+    if (roomCubit.myPlayerId != null && roomCubit.state.code.isNotEmpty) {
+      quizCubit.setContext(roomCubit.myPlayerId!, roomCubit.state.code);
     }
   });
 
@@ -1582,7 +1664,7 @@ void main() {
       providers: [
         BlocProvider.value(value: roomCubit),
         BlocProvider.value(value: quizCubit),
-        BlocProvider(create: (_) => GameCubit(apiUrl: _apiUrl, logger: logger)),
+        BlocProvider(create: (_) => GameCubit(apiService: apiService, logger: logger)),
       ],
       child: const NmtQuizApp(),
     ),
@@ -1827,26 +1909,33 @@ class _ResultsScreenState extends State<ResultsScreen> {
 }
 ```
 
-### 4.2 Backend Deploy (Railway)
+### 4.2 Backend Deploy (Render — free tier)
 
 1. Push `backend/` to GitHub
-2. Create Railway project → "Deploy from GitHub repo"
-3. Set environment variables in Railway dashboard:
-   - `MONGODB_URI` — from MongoDB Atlas connection string
-   - `PORT` — Railway auto-sets this
-   - `CORS_ORIGIN` — your Firebase Hosting URL
+2. Create Render account → "New Web Service" → connect GitHub repo
+3. Set environment variables in Render dashboard:
+   - `SUPABASE_URL` — from Supabase project settings
+   - `SUPABASE_SERVICE_KEY` — service-role key (secret, never commit)
+   - `SUPABASE_ANON_KEY` — anon key (for reference, backend uses service key)
+   - `CORS_ORIGIN` — your Firebase Hosting URL (e.g. `https://nmt-quiz.web.app`)
    - `NODE_ENV=production`
-4. Railway auto-runs `npm start` → uses `dist/main.js`
-5. Set start command to `tsx src/main.ts` for simplicity (no build step needed)
+   - `PORT` — Render sets this automatically
+4. Start command: `npx tsx src/main.ts` (no build step needed with tsx)
 
-**`backend/railway.json`** (optional, explicit config):
-```json
-{
-  "$schema": "https://railway.app/railway.schema.json",
-  "build": { "builder": "NIXPACKS" },
-  "deploy": { "startCommand": "npx tsx src/main.ts", "restartPolicyType": "ON_FAILURE" }
-}
+**`backend/render.yaml`** (optional, explicit config):
+```yaml
+services:
+  - type: web
+    name: nmt-quiz-backend
+    runtime: node
+    buildCommand: npm install
+    startCommand: npx tsx src/main.ts
+    envVars:
+      - key: NODE_ENV
+        value: production
 ```
+
+> **Cold start:** Render free tier sleeps after 15 min inactivity (~30s wake-up). Flutter handles this gracefully — `ApiService` calls will retry on timeout, and `SupabaseService` reconnects automatically.
 
 ### 4.3 Frontend Deploy (Firebase Hosting)
 
@@ -1856,8 +1945,12 @@ npm install -g firebase-tools
 firebase login
 firebase init hosting   # public dir: build/web, SPA rewrite: yes
 
-# Deploy
-flutter build web --release --web-renderer canvaskit
+# Build with runtime config injected via --dart-define
+flutter build web --release --web-renderer canvaskit \
+  --dart-define=API_URL=https://your-render-app.onrender.com \
+  --dart-define=SUPABASE_URL=https://your-project.supabase.co \
+  --dart-define=SUPABASE_ANON_KEY=your-anon-key-here
+
 firebase deploy
 ```
 
@@ -1872,12 +1965,7 @@ firebase deploy
 }
 ```
 
-Set `FLUTTER_API_URL` at build time:
-```bash
-flutter build web --release --dart-define=API_URL=https://your-railway-app.up.railway.app
-```
-
-Then in Flutter: `const String apiUrl = String.fromEnvironment('API_URL', defaultValue: 'http://localhost:3000');`
+> **Security note:** Only `SUPABASE_ANON_KEY` goes into the Flutter build (public). Never put `SUPABASE_SERVICE_KEY` in `--dart-define` — it only lives in the Node.js backend environment variables.
 
 ---
 
@@ -1990,7 +2078,7 @@ If `make check-fe` fails:
 
 ## Final Verification Checklist (Phase 4 Gate)
 
-- [ ] `make seed-db` → MongoDB shows 3,595 docs, `subject` index exists
+- [ ] `make seed-db` → Supabase shows 3,595 rows in `questions` table (`SELECT COUNT(*) FROM questions` via MCP)
 - [ ] `make smoke-test` (with backend running) → both endpoints return valid JSON
 - [ ] Open two browser tabs → both join same room → both see lobby with their names
 - [ ] Creator taps "Почати гру" → both see first question (no `correct_answer_index` in payload — verify in DevTools Network tab)
