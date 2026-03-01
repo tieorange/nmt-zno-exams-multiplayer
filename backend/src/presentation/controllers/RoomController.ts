@@ -12,6 +12,7 @@ import { broadcastToRoom } from '../../config/supabase.js';
 import { CreateRoomSchema, JoinRoomSchema, HeartbeatSchema } from '../validators/requestSchemas.js';
 import { registerPlayerSession, registerPingOnly, getPlayerBySession, pingHeartbeat } from '../../services/PlayerManager.js';
 import { logger } from '../../config/logger.js';
+import { getCurrentClientQuestion } from '../../services/GameEngine.js';
 
 export async function createRoom(req: Request, res: Response) {
   const parsed = CreateRoomSchema.safeParse(req.body);
@@ -37,12 +38,17 @@ export async function getRoomState(req: Request, res: Response) {
   }
 
   const players = await getPlayers(code);
+
+  // Bug fix: If game is active, include the current question payload for reconnection sync
+  const currentQuestion = room.status === 'playing' ? getCurrentClientQuestion(code) : null;
+
   res.json({
     code: room.code,
     subject: room.subject,
     status: room.status,
     maxPlayers: room.max_players,
     currentQuestionIndex: room.current_question_index,
+    currentQuestion,
     players: players.map((p) => ({
       id: p.id,
       name: p.name,

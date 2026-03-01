@@ -59,44 +59,62 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
     logger.info(`[PlayerManager] Player disconnected | roomCode=${roomCode} playerId=${playerId}`);
 
     try {
-        await removePlayer(roomCode, playerId);
+        const room = await getRoom(roomCode);
+        if (!room) return;
+
+        // Bug fix: If game is active, DO NOT remove the player from the DB.
+        // This preserves their score and allows them to rejoin later.
+        // We only remove them if the game hasn't started yet.
+        if (room.status === 'waiting') {
+            await removePlayer(roomCode, playerId);
+        }
 
         const players = await getPlayers(roomCode);
-        if (players.length === 0) {
-            // Room is empty, delete it
+
+        // Count actually "online" players (those who still have a ping entry)
+        const onlinePlayers = players.filter(p => pings.has(p.id));
+
+        if (onlinePlayers.length === 0) {
+            // Room is empty/all offline, delete it
             await deleteRoom(roomCode);
             clearRoom(roomCode);
-            logger.info(`[PlayerManager] Room deleted due to zero players | roomCode=${roomCode}`);
+            logger.info(`[PlayerManager] Room deleted due to zero online players | roomCode=${roomCode}`);
             return;
         }
 
         // Check if we need to reassign creator
         const hasCreator = players.some((p) => p.is_creator);
         if (!hasCreator) {
-            const oldestPlayer = players.sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())[0];
+            // Reassign to the oldest remaining ONLINE player preferred, or just oldest
+            const candidates = onlinePlayers.length > 0 ? onlinePlayers : players;
+            const oldestPlayer = candidates.sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())[0];
             await setCreator(roomCode, oldestPlayer.id);
             logger.info(`[PlayerManager] Reassigned creator | roomCode=${roomCode} newCreatorId=${oldestPlayer.id}`);
         }
 
         // Broadcast room state update
-        const room = await getRoom(roomCode);
-        if (room) {
-            const updatedPlayers = await getPlayers(roomCode);
-            await broadcastToRoom(roomCode, 'room:state', {
-                code: room.code,
-                subject: room.subject,
-                status: room.status,
-                maxPlayers: room.max_players,
-                currentQuestionIndex: room.current_question_index,
-                players: updatedPlayers.map((p) => ({
-                    id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.is_creator
-                })),
-            });
-            // Also broadcast explicit player disconnected so client can show a toast
-            await broadcastToRoom(roomCode, 'player:disconnected', { playerId });
-        }
+        const updatedPlayers = await getPlayers(roomCode);
+        await broadcastToRoom(roomCode, 'room:state', {
+            code: room.code,
+            subject: room.subject,
+            status: room.status,
+            maxPlayers: room.max_players,
+            currentQuestionIndex: room.current_question_index,
+            players: updatedPlayers.map((p) => ({
+                id: p.id, name: p.name, color: p.color, score: p.score, isCreator: p.is_creator
+            })),
+        });
+        // Also broadcast explicit player disconnected so client can show a toast
+        await broadcastToRoom(roomCode, 'player:disconnected', { playerId });
 
     } catch (err) {
         logger.error(`[PlayerManager] Disconnect handling failed | err=${String(err)}`);
     }
+}
+
+/**
+ * Returns true if the player is considered offline (missed heartbeats)
+ */
+export function isPlayerOffline(playerId: string): boolean {
+    return !pings.has(playerId);
 }

@@ -14,6 +14,7 @@ import {
 } from '../data/repositories/QuestionRepository.js';
 import { clearRoom } from './NameGenerator.js';
 import { logger } from '../config/logger.js';
+import { isPlayerOffline } from './PlayerManager.js';
 
 const QUESTION_COUNT = 10;
 // Override with env var for testing (e.g. ROUND_TIMER_MS=10000 for 10s rounds)
@@ -35,70 +36,87 @@ const roundState = new Map<string, RoundState>();
 // Track cleanup timeouts so we can cancel if a room gets reused
 const cleanupTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
+// Mutex to prevent multiple startGame calls for the same room simultaneously
+const startingMutex = new Set<string>();
+
 export async function startGame(roomCode: string): Promise<void> {
-  const room = await getRoom(roomCode);
-  if (!room || room.status !== 'waiting') return;
+  if (startingMutex.has(roomCode)) return;
+  startingMutex.add(roomCode);
 
-  const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
-  if (questions.length < QUESTION_COUNT) {
-    logger.warn(
-      `[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`,
+  try {
+    const room = await getRoom(roomCode);
+    if (!room || room.status !== 'waiting') return;
+
+    const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
+    if (questions.length < QUESTION_COUNT) {
+      logger.warn(
+        `[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`,
+      );
+    }
+
+    const questionIds = questions.map((q) => q.id);
+
+    // Cancel any leftover cleanup timeout for this room (e.g. restart scenario)
+    const existingCleanup = cleanupTimeouts.get(roomCode);
+    if (existingCleanup) {
+      clearTimeout(existingCleanup);
+      cleanupTimeouts.delete(roomCode);
+    }
+
+    await updateRoom(roomCode, {
+      status: 'playing',
+      question_ids: questionIds,
+      current_question_index: 0,
+    });
+
+    logger.info(
+      `[GameEngine] Game started | roomCode=${roomCode} questions=${questions.length}`,
     );
+
+    await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
+    await startRound(roomCode, 0, questions);
+  } finally {
+    startingMutex.delete(roomCode);
   }
-
-  const questionIds = questions.map((q) => q.id);
-
-  // Cancel any leftover cleanup timeout for this room (e.g. restart scenario)
-  const existingCleanup = cleanupTimeouts.get(roomCode);
-  if (existingCleanup) {
-    clearTimeout(existingCleanup);
-    cleanupTimeouts.delete(roomCode);
-  }
-
-  await updateRoom(roomCode, {
-    status: 'playing',
-    question_ids: questionIds,
-    current_question_index: 0,
-  });
-
-  logger.info(
-    `[GameEngine] Game started | roomCode=${roomCode} questions=${questions.length}`,
-  );
-
-  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
-  await startRound(roomCode, 0, questions);
 }
 
 export async function restartGame(roomCode: string): Promise<void> {
-  const room = await getRoom(roomCode);
-  if (!room || room.status !== 'finished') return;
+  if (startingMutex.has(roomCode)) return;
+  startingMutex.add(roomCode);
 
-  const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
-  if (questions.length < QUESTION_COUNT) {
-    logger.warn(`[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`);
+  try {
+    const room = await getRoom(roomCode);
+    if (!room || room.status !== 'finished') return;
+
+    const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
+    if (questions.length < QUESTION_COUNT) {
+      logger.warn(`[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`);
+    }
+
+    const questionIds = questions.map((q) => q.id);
+
+    const existingCleanup = cleanupTimeouts.get(roomCode);
+    if (existingCleanup) {
+      clearTimeout(existingCleanup);
+      cleanupTimeouts.delete(roomCode);
+    }
+
+    await updateRoom(roomCode, {
+      status: 'playing',
+      question_ids: questionIds,
+      current_question_index: 0,
+    });
+
+    logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
+
+    // Bug 9 Fix: Zero out scores on restart
+    await resetScores(roomCode);
+
+    await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
+    await startRound(roomCode, 0, questions);
+  } finally {
+    startingMutex.delete(roomCode);
   }
-
-  const questionIds = questions.map((q) => q.id);
-
-  const existingCleanup = cleanupTimeouts.get(roomCode);
-  if (existingCleanup) {
-    clearTimeout(existingCleanup);
-    cleanupTimeouts.delete(roomCode);
-  }
-
-  await updateRoom(roomCode, {
-    status: 'playing',
-    question_ids: questionIds,
-    current_question_index: 0,
-  });
-
-  logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
-
-  // Bug 9 Fix: Zero out scores on restart
-  await resetScores(roomCode);
-
-  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
-  await startRound(roomCode, 0, questions);
 }
 
 async function startRound(
@@ -149,7 +167,12 @@ export async function submitAnswer(
 ): Promise<void> {
   const state = roundState.get(roomCode);
   if (!state) throw new Error('Гру не знайдено або раунд ще не почався');
-  if (state.answers.get(playerId) !== null) throw new Error('Ви вже відповіли на це запитання');
+
+  // Bug fix: Check for undefined explicitly in case of mid-round late joins or unmapped players
+  const existingAnswer = state.answers.get(playerId);
+  if (existingAnswer !== undefined && existingAnswer !== null) {
+    throw new Error('Ви вже відповіли на це запитання');
+  }
 
   // Validate questionId matches current round
   const currentQuestion = state.questions[state.questionIndex];
@@ -181,7 +204,10 @@ export async function submitAnswer(
 
   // Check if all active players have answered → early reveal
   const players = await getPlayers(roomCode);
-  const allAnswered = players.every((p) => state.answers.get(p.id) !== null);
+  const allAnswered = players.every((p) => {
+    // If the player answered OR they are currently offline, they don't block the reveal
+    return state.answers.get(p.id) !== null || isPlayerOffline(p.id);
+  });
   if (allAnswered) {
     clearTimeout(state.timer);
     await revealRound(roomCode, state.questions, state.questionIndex);
@@ -211,17 +237,19 @@ async function revealRound(
     );
   }
 
-  // Update scores
+  // Update scores in parallel to reduce broadcast latency
   const players = await getPlayers(roomCode);
-  const scores: Record<string, number> = {};
+  const scoreUpdates: Promise<void>[] = [];
+
   for (const player of players) {
     const answer = state.answers.get(player.id);
     if (answer === correctIndex) {
-      await incrementPlayerScore(roomCode, player.id, CORRECT_ANSWER_POINTS);
-      scores[player.id] = player.score + CORRECT_ANSWER_POINTS;
-    } else {
-      scores[player.id] = player.score;
+      scoreUpdates.push(incrementPlayerScore(roomCode, player.id, CORRECT_ANSWER_POINTS));
     }
+  }
+
+  if (scoreUpdates.length > 0) {
+    await Promise.all(scoreUpdates);
   }
 
   // Re-fetch fresh scores from DB after all increments complete — avoids broadcasting
@@ -298,4 +326,22 @@ async function fetchQuestionsOrdered(questionIds: string[]): Promise<Question[]>
   const docs = await getQuestionsByIds(questionIds);
   const docMap = new Map(docs.map((d) => [d.id, d]));
   return questionIds.map((id) => docMap.get(id)!);
+}
+
+/**
+ * Returns the current question payload for a given room if a round is active.
+ * Used for mid-game reconnections to sync the client UI.
+ */
+export function getCurrentClientQuestion(roomCode: string) {
+  const state = roundState.get(roomCode);
+  if (!state) return null;
+
+  const q = state.questions[state.questionIndex];
+  return {
+    id: q.id,
+    subject: q.subject,
+    text: q.text,
+    choices: q.choices,
+    questionIndex: state.questionIndex,
+  };
 }
