@@ -64,7 +64,7 @@ export async function startGame(roomCode: string): Promise<void> {
     `[GameEngine] Game started | roomCode=${roomCode} questions=${questions.length}`,
   );
 
-  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length });
+  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
   await startRound(roomCode, 0, questions);
 }
 
@@ -92,7 +92,7 @@ export async function restartGame(roomCode: string): Promise<void> {
   });
 
   logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
-  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length });
+  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
   await startRound(roomCode, 0, questions);
 }
 
@@ -219,14 +219,20 @@ async function revealRound(
     }
   }
 
+  // Re-fetch fresh scores from DB after all increments complete — avoids broadcasting
+  // stale pre-increment values that make the scoreboard look one round behind.
+  const freshPlayers = await getPlayers(roomCode);
+  const freshScores: Record<string, number> = {};
+  for (const p of freshPlayers) freshScores[p.id] = p.score;
+
   logger.info(
-    `[GameEngine] Round reveal | roomCode=${roomCode} correctIndex=${correctIndex} scores=${JSON.stringify(scores)}`,
+    `[GameEngine] Round reveal | roomCode=${roomCode} correctIndex=${correctIndex} scores=${JSON.stringify(freshScores)}`,
   );
 
   await safeBroadcast(roomCode, 'round:reveal', {
     correctIndex,
     playerAnswers: Object.fromEntries(state.answers),
-    scores,
+    scores: freshScores,
   });
 
   setTimeout(() => {
@@ -288,6 +294,3 @@ async function fetchQuestionsOrdered(questionIds: string[]): Promise<Question[]>
   const docMap = new Map(docs.map((d) => [d.id, d]));
   return questionIds.map((id) => docMap.get(id)!);
 }
-
-// Public export for testing/admin use
-export { fetchQuestionsOrdered };

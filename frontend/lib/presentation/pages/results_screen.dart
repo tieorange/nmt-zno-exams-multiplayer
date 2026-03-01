@@ -23,7 +23,17 @@ class _ResultsScreenState extends State<ResultsScreen> {
   @override
   void initState() {
     super.initState();
-    _confetti.play();
+    // Bug 10 fix: play confetti only if the current player won
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      final roomCubit = context.read<RoomCubit>();
+      final quizState = context.read<QuizCubit>().state;
+      if (quizState is QuizGameEnded && quizState.scoreboard.isNotEmpty) {
+        final winner = quizState.scoreboard.first;
+        if (winner['id'] == roomCubit.myPlayerId) {
+          _confetti.play();
+        }
+      }
+    });
   }
 
   @override

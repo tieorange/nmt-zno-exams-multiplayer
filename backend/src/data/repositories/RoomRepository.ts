@@ -62,11 +62,16 @@ export async function addPlayer(roomCode: string, player: Omit<Player, 'room_cod
 }
 
 export async function incrementPlayerScore(roomCode: string, playerId: string, delta: number): Promise<void> {
-  const { data: p } = await supabase
-    .from('players').select('score').eq('id', playerId).single();
-  const newScore = (p?.score ?? 0) + delta;
-  const { error } = await supabase
-    .from('players').update({ score: newScore }).eq('id', playerId).eq('room_code', roomCode);
+  // Uses a PostgreSQL function for atomic increment — avoids the read-modify-write race
+  // when multiple players answer correctly at the same time.
+  // SQL: CREATE OR REPLACE FUNCTION increment_player_score(player_id uuid, delta int, r_code text)
+  //      RETURNS void AS $$ UPDATE players SET score = score + delta
+  //      WHERE id = player_id AND room_code = r_code; $$ LANGUAGE sql;
+  const { error } = await supabase.rpc('increment_player_score', {
+    player_id: playerId,
+    delta,
+    r_code: roomCode,
+  });
   if (error) throw new Error(`[RoomRepo] incrementPlayerScore failed: ${error.message}`);
 }
 

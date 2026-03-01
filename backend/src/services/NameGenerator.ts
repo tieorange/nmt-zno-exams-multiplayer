@@ -22,8 +22,9 @@ export function assignName(roomCode: string): { name: string; color: string } {
   const name = available.length > 0
     ? available[Math.floor(Math.random() * available.length)]
     : `Гравець ${used.size + 1}`;
+  const colorIndex = used.size % COLORS.length; // capture BEFORE adding name
   used.add(name);
-  const color = COLORS[used.size % COLORS.length];
+  const color = COLORS[colorIndex];
   return { name, color };
 }
 

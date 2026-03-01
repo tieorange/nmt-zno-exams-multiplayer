@@ -11,6 +11,7 @@ class RoomCubit extends Cubit<RoomState> {
   final ApiService apiService;
   final Logger logger;
   late StreamSubscription<RealtimeEvent> _sub;
+  Timer? _heartbeatTimer;
 
   // Set on joinRoom() response — used by QuizCubit to identify "my" answers
   String? myPlayerId;
@@ -34,10 +35,22 @@ class RoomCubit extends Cubit<RoomState> {
       myName = result['name'] as String;
       myIsCreator = result['isCreator'] as bool? ?? false;
       logger.i('[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator');
+
+      // Start heartbeat — backend disconnects players after 60s of silence
+      _startHeartbeat(roomCode.toUpperCase());
     } catch (e) {
       logger.e('[RoomCubit] joinRoom failed | err=$e');
       emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
     }
+  }
+
+  void _startHeartbeat(String roomCode) {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (myPlayerId != null) {
+        apiService.heartbeat(roomCode, myPlayerId!);
+      }
+    });
   }
 
   Future<void> startGame() async {
@@ -97,6 +110,7 @@ class RoomCubit extends Cubit<RoomState> {
   @override
   Future<void> close() {
     _sub.cancel();
+    _heartbeatTimer?.cancel();
     supabaseService.unsubscribe();
     return super.close();
   }

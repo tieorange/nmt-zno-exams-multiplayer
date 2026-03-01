@@ -20,15 +20,12 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
   @override
   void initState() {
     super.initState();
-    // Auto-navigate after 3 seconds
+    // Bug 9 fix: always navigate back to game screen after reveal.
+    // GameplayScreen's BlocConsumer already handles QuizGameEnded → /results.
+    // Having both screens try to push /results caused a double-navigation race.
     Future.delayed(const Duration(seconds: 3), () {
       if (!mounted) return;
-      final quizState = context.read<QuizCubit>().state;
-      if (quizState is QuizGameEnded) {
-        context.go('/room/${widget.roomCode}/results');
-      } else {
-        context.go('/room/${widget.roomCode}/game');
-      }
+      context.go('/room/${widget.roomCode}/game');
     });
   }
 

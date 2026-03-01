@@ -18,6 +18,12 @@ export function registerPlayerSession(sessionId: string, playerId: string, roomC
     pings.set(playerId, session);
 }
 
+// Register heartbeat tracking only — used when no sessionId is available (no duplicate-tab protection)
+export function registerPingOnly(playerId: string, roomCode: string) {
+    const session = { playerId, roomCode, lastPing: Date.now() };
+    pings.set(playerId, session);
+}
+
 export function getPlayerBySession(sessionId: string): string | undefined {
     return sessions.get(sessionId)?.playerId;
 }

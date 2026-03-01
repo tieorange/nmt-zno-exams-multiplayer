@@ -17,6 +17,8 @@ class QuizCubit extends Cubit<QuizState> {
   String? _roomCode;
   int _questionIndex = 0;
   int _totalQuestions = 10;
+  // Bug 8 fix: driven by game:start payload (timerMs) instead of hardcoded 5 min
+  int _timerMs = 5 * 60 * 1000;
 
   QuizCubit({required this.supabaseService, required this.apiService, required this.logger})
     : super(const QuizInitial()) {
@@ -32,7 +34,10 @@ class QuizCubit extends Cubit<QuizState> {
     switch (event.type) {
       case RealtimeEventType.gameStart:
         _totalQuestions = event.data['totalQuestions'] as int? ?? 10;
+        // Bug 7 fix: reset question index to 0 on every game start (handles restarts)
         _questionIndex = 0;
+        // Bug 8 fix: read timer duration from server so we stay in sync with ROUND_TIMER_MS
+        _timerMs = event.data['timerMs'] as int? ?? (5 * 60 * 1000);
         break;
       case RealtimeEventType.questionNew:
         _handleNewQuestion(event.data);
@@ -61,7 +66,7 @@ class QuizCubit extends Cubit<QuizState> {
     _questionIndex++;
     _currentQuestion = ClientQuestion.fromJson(data);
     logger.i(
-      '[QuizCubit] question:new received | questionId=${_currentQuestion!.id} choicesCount=${_currentQuestion!.choices.length} timerMs=300000',
+      '[QuizCubit] question:new received | questionId=${_currentQuestion!.id} choicesCount=${_currentQuestion!.choices.length} timerMs=$_timerMs',
     );
 
     emit(
@@ -69,7 +74,7 @@ class QuizCubit extends Cubit<QuizState> {
         question: _currentQuestion!,
         questionIndex: _questionIndex,
         totalQuestions: _totalQuestions,
-        timeRemaining: const Duration(minutes: 5),
+        timeRemaining: Duration(milliseconds: _timerMs),
       ),
     );
     _startTimer();
@@ -77,7 +82,8 @@ class QuizCubit extends Cubit<QuizState> {
 
   void _startTimer() {
     _timer?.cancel();
-    var remaining = const Duration(minutes: 5);
+    // Bug 8 fix: use server-provided timer duration
+    var remaining = Duration(milliseconds: _timerMs);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       remaining -= const Duration(seconds: 1);
       if (remaining.isNegative) {
@@ -126,8 +132,14 @@ class QuizCubit extends Cubit<QuizState> {
     );
     // Optimistic UI update — lock button immediately
     emit(s.copyWith(myAnswer: answerIndex));
-    // Send to Node.js REST (not via Supabase — server must validate)
-    await apiService.submitAnswer(_roomCode!, _myPlayerId!, s.question.id, answerIndex);
+    try {
+      // Bug 12 fix: wrap in try/catch and revert optimistic update on failure
+      await apiService.submitAnswer(_roomCode!, _myPlayerId!, s.question.id, answerIndex);
+    } catch (e) {
+      logger.e('[QuizCubit] submitAnswer failed | err=$e');
+      // Revert the optimistic update so the player can try again
+      emit(s.copyWith(myAnswer: null));
+    }
   }
 
   @override

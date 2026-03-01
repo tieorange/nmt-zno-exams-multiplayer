@@ -30,20 +30,23 @@ class QuizQuestion extends QuizState {
 
   QuizQuestion copyWith({
     Duration? timeRemaining,
-    int? myAnswer,
+    Object? myAnswer = _kUndefined,
     Map<String, int?>? playerAnswers,
   }) => QuizQuestion(
     question: question,
     questionIndex: questionIndex,
     totalQuestions: totalQuestions,
     timeRemaining: timeRemaining ?? this.timeRemaining,
-    myAnswer: myAnswer ?? this.myAnswer,
+    myAnswer: myAnswer == _kUndefined ? this.myAnswer : myAnswer as int?,
     playerAnswers: playerAnswers ?? this.playerAnswers,
   );
 
   @override
   List<Object?> get props => [question, questionIndex, timeRemaining, myAnswer, playerAnswers];
 }
+
+// Sentinel to distinguish "not provided" from "explicitly set to null" in copyWith
+const _kUndefined = Object();
 
 class QuizReveal extends QuizState {
   final ClientQuestion question;

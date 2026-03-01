@@ -84,7 +84,10 @@ class GameplayScreen extends StatelessWidget {
                         return AnswerButton(
                               text: q.question.choices[i],
                               state: answerState,
-                              onTap: () => ctx.read<QuizCubit>().submitAnswer(i),
+                              // Bug 11 fix: disable all buttons once player has answered
+                              onTap: q.myAnswer == null
+                                  ? () => ctx.read<QuizCubit>().submitAnswer(i)
+                                  : null,
                             )
                             .animate()
                             .fadeIn(

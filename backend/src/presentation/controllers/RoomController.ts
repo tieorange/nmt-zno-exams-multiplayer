@@ -10,7 +10,7 @@ import { generateUniqueCode } from '../../services/CodeGenerator.js';
 import { assignName } from '../../services/NameGenerator.js';
 import { broadcastToRoom } from '../../config/supabase.js';
 import { CreateRoomSchema, JoinRoomSchema, HeartbeatSchema } from '../validators/requestSchemas.js';
-import { registerPlayerSession, getPlayerBySession, pingHeartbeat } from '../../services/PlayerManager.js';
+import { registerPlayerSession, registerPingOnly, getPlayerBySession, pingHeartbeat } from '../../services/PlayerManager.js';
 import { logger } from '../../config/logger.js';
 
 export async function createRoom(req: Request, res: Response) {
@@ -77,6 +77,8 @@ export async function joinRoom(req: Request, res: Response) {
       const player = existingPlayers.find(p => p.id === existingPlayerId);
       if (player) {
         logger.info(`[RoomController] Player rejoined via session | roomCode=${code} playerId=${existingPlayerId}`);
+        // Re-register heartbeat so the player isn't swept as disconnected
+        registerPlayerSession(sessionId, existingPlayerId, code);
         res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator });
         return;
       }
@@ -100,12 +102,12 @@ export async function joinRoom(req: Request, res: Response) {
 
   await addPlayer(code, { id: playerId, name, color, score: 0, is_creator: isCreator });
 
-  // Register session
+  // Register heartbeat tracking
   if (sessionId) {
     registerPlayerSession(sessionId, playerId, code);
   } else {
-    // Fallback to registering ping baseline using playerId
-    registerPlayerSession(playerId, playerId, code);
+    // No sessionId provided — register heartbeat-only (no duplicate-tab protection)
+    registerPingOnly(playerId, code);
   }
 
   const updatedPlayers = await getPlayers(code);
