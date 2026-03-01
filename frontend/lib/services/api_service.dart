@@ -95,4 +95,14 @@ class ApiService {
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return List<Map<String, dynamic>>.from(data['subjects'] as List);
   }
+
+  Future<void> restartGame(String roomCode, String playerId) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/restart | playerId=$playerId');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/restart'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId}),
+    );
+    if (res.statusCode != 200) throw Exception('restartGame failed: ${res.body}');
+  }
 }

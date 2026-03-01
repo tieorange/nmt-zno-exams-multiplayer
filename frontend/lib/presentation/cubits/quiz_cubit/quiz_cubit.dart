@@ -104,6 +104,13 @@ class QuizCubit extends Cubit<QuizState> {
 
   void _handleReveal(Map<String, dynamic> data) {
     _timer?.cancel();
+    
+    // Guard: if we missed question:new, we can't show the reveal properly
+    if (_currentQuestion == null) {
+      logger.w('[QuizCubit] round:reveal received but _currentQuestion is null - ignoring');
+      return;
+    }
+
     final correctIndex = data['correctIndex'] as int;
     final raw = data['playerAnswers'] as Map<String, dynamic>? ?? {};
     final answers = raw.map((k, v) => MapEntry(k, v as int?));
