@@ -1,0 +1,68 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "NMT Quiz Question",
+    "description": "A single multiple-choice question from the Ukrainian NMT/ZNO exam database.",
+    "type": "object",
+    "required": [
+        "id",
+        "subject",
+        "text",
+        "choices",
+        "correct_answer_index",
+        "exam_type"
+    ],
+    "properties": {
+        "id": {
+            "type": "string",
+            "description": "Unique question ID. Prefix 'osy_' = osyvokon/zno dataset (Language, History). Prefix 'nlp_' = NLPForUA dataset (Math, Geography).",
+            "examples": [
+                "osy_ukrainian_language_0",
+                "nlp_math_1743"
+            ]
+        },
+        "subject": {
+            "type": "string",
+            "description": "Subject/topic the question belongs to. Used to select a question pool when creating a game room.",
+            "enum": [
+                "ukrainian_language",
+                "history",
+                "math",
+                "geography"
+            ]
+        },
+        "text": {
+            "type": "string",
+            "description": "The full question text in Ukrainian. May contain mathematical expressions in plain Unicode text format (e.g. 'x^2', 'log_2(x)')."
+        },
+        "choices": {
+            "type": "array",
+            "description": "Array of answer option texts in Ukrainian. Length is always 2–5. Array index corresponds to the answer label (0=А, 1=Б, 2=В, 3=Г, 4=Д). All matching/correspondence question types (>5 options) have been pre-filtered out.",
+            "minItems": 2,
+            "maxItems": 5,
+            "items": {
+                "type": "string"
+            },
+            "examples": [
+                [
+                    "Київ",
+                    "Харків",
+                    "Львів",
+                    "Одеса"
+                ]
+            ]
+        },
+        "correct_answer_index": {
+            "type": "integer",
+            "description": "Zero-based index into the 'choices' array pointing to the correct answer. NEVER send this field to the client until the round timer expires.",
+            "minimum": 0,
+            "maximum": 4
+        },
+        "exam_type": {
+            "type": "string",
+            "description": "Exam series this question is from. Currently all questions are tagged 'ZNO_NMT_General' since source datasets do not provide year metadata.",
+            "enum": [
+                "ZNO_NMT_General"
+            ]
+        }
+    }
+}
