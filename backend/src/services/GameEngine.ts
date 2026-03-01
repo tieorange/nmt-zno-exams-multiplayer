@@ -68,6 +68,34 @@ export async function startGame(roomCode: string): Promise<void> {
   await startRound(roomCode, 0, questions);
 }
 
+export async function restartGame(roomCode: string): Promise<void> {
+  const room = await getRoom(roomCode);
+  if (!room || room.status !== 'finished') return;
+
+  const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
+  if (questions.length < QUESTION_COUNT) {
+    logger.warn(`[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`);
+  }
+
+  const questionIds = questions.map((q) => q.id);
+
+  const existingCleanup = cleanupTimeouts.get(roomCode);
+  if (existingCleanup) {
+    clearTimeout(existingCleanup);
+    cleanupTimeouts.delete(roomCode);
+  }
+
+  await updateRoom(roomCode, {
+    status: 'playing',
+    question_ids: questionIds,
+    current_question_index: 0,
+  });
+
+  logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
+  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length });
+  await startRound(roomCode, 0, questions);
+}
+
 async function startRound(
   roomCode: string,
   questionIndex: number,

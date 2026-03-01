@@ -69,3 +69,13 @@ export async function incrementPlayerScore(roomCode: string, playerId: string, d
     .from('players').update({ score: newScore }).eq('id', playerId).eq('room_code', roomCode);
   if (error) throw new Error(`[RoomRepo] incrementPlayerScore failed: ${error.message}`);
 }
+
+export async function removePlayer(roomCode: string, playerId: string): Promise<void> {
+  const { error } = await supabase.from('players').delete().eq('id', playerId).eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] removePlayer failed: ${error.message}`);
+}
+
+export async function setCreator(roomCode: string, playerId: string): Promise<void> {
+  const { error } = await supabase.from('players').update({ is_creator: true }).eq('id', playerId).eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] setCreator failed: ${error.message}`);
+}

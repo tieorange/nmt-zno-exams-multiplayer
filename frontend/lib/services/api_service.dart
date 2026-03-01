@@ -1,17 +1,20 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
+import 'package:uuid/uuid.dart';
 
 /// Handles all client→server REST calls to the Node.js backend.
 class ApiService {
   final String baseUrl;
   final Logger logger;
+  final String sessionId;
 
   ApiService({required this.logger})
       : baseUrl = const String.fromEnvironment(
           'API_URL',
           defaultValue: 'http://localhost:3000',
-        );
+        ),
+        sessionId = const Uuid().v4();
 
   Future<Map<String, dynamic>> createRoom(
       String subject, int maxPlayers) async {
@@ -28,10 +31,11 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> joinRoom(String roomCode) async {
-    logger.i('[ApiService] POST /api/rooms/$roomCode/join');
+    logger.i('[ApiService] POST /api/rooms/$roomCode/join | sessionId=$sessionId');
     final res = await http.post(
       Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/join'),
       headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'sessionId': sessionId}),
     );
     if (res.statusCode != 200) throw Exception('joinRoom failed: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -47,6 +51,25 @@ class ApiService {
       body: jsonEncode({'playerId': playerId}),
     );
     if (res.statusCode != 200) throw Exception('startGame failed: ${res.body}');
+  }
+
+  Future<void> restartGame(String roomCode, String playerId) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/restart | playerId=$playerId');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/restart'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId}),
+    );
+    if (res.statusCode != 200) throw Exception('restartGame failed: ${res.body}');
+  }
+
+  Future<void> heartbeat(String roomCode, String playerId) async {
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/heartbeat'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId}),
+    );
+    if (res.statusCode != 200) throw Exception('heartbeat failed: ${res.body}');
   }
 
   Future<void> submitAnswer(

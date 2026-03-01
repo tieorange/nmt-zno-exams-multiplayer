@@ -149,6 +149,7 @@ nmt-zno-exams-multiplayer/
 ### 3. Join Room Flow
 - Player visits the home screen, taps "Join Room", enters 3-digit code  
 - OR opens the shared URL directly → auto-joins the room
+- Sends a persistent `sessionId` to prevent duplicate slots if opening multiple tabs wrapper
 - Gets assigned a random funny name + color
 - Lands in the **waiting lobby**
 
@@ -186,9 +187,11 @@ nmt-zno-exams-multiplayer/
 
 | Event / Endpoint | Direction | Transport | Payload |
 |---|---|---|---|
-| `POST /api/rooms/:code/join` | client → server | REST | `{}` body → returns `{ playerId, name, color, isCreator }` |
+| `POST /api/rooms/:code/join` | client → server | REST | `{ sessionId }` body → returns `{ playerId, name, color, isCreator }` |
 | `room:state` | server → all in room | Supabase Broadcast | `{ code, subject, status, maxPlayers, players }` |
 | `POST /api/rooms/:code/start` | client → server | REST | `{ playerId }` — creator triggers game start |
+| `POST /api/rooms/:code/heartbeat` | client → server | REST | `{ playerId }` — keeps player active |
+| `POST /api/rooms/:code/restart` | client → server | REST | `{ playerId }` — creator restarts game |
 | `game:start` | server → all | Supabase Broadcast | `{ totalQuestions: 10 }` — game has begun |
 | `question:new` | server → all | Supabase Broadcast | `ClientQuestion` (no `correct_answer_index`) |
 | `POST /api/rooms/:code/answer` | client → server | REST | `{ playerId, questionId, answerIndex }` |
@@ -203,14 +206,14 @@ nmt-zno-exams-multiplayer/
 
 | Scenario | Handling |
 |---|---|
-| Player disconnects mid-game | Mark as `null` answer for that round, game continues for remaining players |
+| Player disconnects mid-game | PlayerManager sweeps them after 60s of missed heartbeats. Mark as `null` answer for that round, game continues for remaining players. |
 | Only 1 player left | Game continues as solo mode |
-| Creator disconnects | Assign creator role to next player in room |
+| Creator disconnects | `PlayerManager` automatically reassigns creator role to the oldest remaining player. |
 | Player tries to join full room (4/4) | Reject with error message |
-| Player opens same link twice | Detect duplicate session, show error |
+| Player opens same link twice | Backend checks `sessionId`; reconnects to existing identity instead of making a duplicate slot. |
 | Room code collision | Regenerate on collision (rare with alphanumeric 3-char codes = 46,656 combos) |
 | Player joins after game started | Reject — rooms are locked once game starts |
-| All players disconnect | Clean up room from server after 60s timeout |
+| All players disconnect | `PlayerManager` cleans up room from DB and RAM after the last player is removed. |
 
 ---
 

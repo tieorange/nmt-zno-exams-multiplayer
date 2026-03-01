@@ -10,6 +10,18 @@ export const CreateRoomSchema = z.object({
   maxPlayers: z.number().int().min(1).max(4),
 });
 
+export const JoinRoomSchema = z.object({
+  sessionId: z.string().min(1).optional(),
+});
+
+export const HeartbeatSchema = z.object({
+  playerId: z.string().uuid(),
+});
+
+export const RestartGameSchema = z.object({
+  playerId: z.string().uuid(),
+});
+
 export const StartGameSchema = z.object({
   playerId: z.string().uuid(),
 });

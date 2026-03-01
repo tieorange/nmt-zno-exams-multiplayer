@@ -1864,6 +1864,30 @@ Manual test checklist in the browser:
 
 ---
 
+## Phase 3.5 — Advanced Multiplayer Features & Refinements
+
+> **Note:** The following features have been implemented on top of the base scaffolding to create a production-ready multiplayer experience. 
+
+### 1. Heartbeats & Disconnect Sweeper
+- Backend `PlayerManager.ts` listens on `POST /api/rooms/:code/heartbeat` and records timestamps.
+- A 60-second periodic sweep in Node.js removes players who fail to ping the heartbeat endpoint.
+- Frontend Flutter app sends a `heartbeat()` REST call to the server every 15 seconds after successfully joining the room.
+
+### 2. Duplicate Join Prevention
+- To prevent one user from occupying multiple slots by reloading or duplicating a tab, the Flutter `ApiService` generates a persistant frontend `sessionId` per app-load.
+- `POST /api/rooms/:code/join` checks `sessionId` on the server and maps the connection back to the existing player if they previously joined the room.
+
+### 3. Creator Reassignment
+- If the `is_creator` player disconnects, `PlayerManager.ts` automatically promotes the next oldest player in the room to `is_creator` role.
+- Flutter's `RoomCubit` handles this on the `room:state` event, automatically rendering "Почати гру" or "Грати ще раз" for the new creator.
+
+### 4. Play Again (Restart Flow)
+- `GameController.ts` and `GameEngine.ts` provide a `POST /api/rooms/:code/restart` endpoint.
+- Only the creator can trigger a restart. When called, the engine securely drops round state, fetches 10 new questions, and transitions back to `playing`. 
+- Clients listen for `game:start` even when on the `ResultsScreen` to jump right back into gameplay.
+
+---
+
 ## Phase 4 — Polish + Deploy
 
 ### 4.1 Results Screen with Confetti

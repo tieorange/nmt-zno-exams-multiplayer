@@ -11,6 +11,7 @@ class RoomCubit extends Cubit<RoomState> {
   final ApiService apiService;
   final Logger logger;
   late final StreamSubscription<RealtimeEvent> _sub;
+  Timer? _heartbeatTimer;
 
   // Set on joinRoom() response — used by QuizCubit to identify "my" answers
   String? myPlayerId;
@@ -18,11 +19,8 @@ class RoomCubit extends Cubit<RoomState> {
   String? myColor;
   bool myIsCreator = false;
 
-  RoomCubit({
-    required this.supabaseService,
-    required this.apiService,
-    required this.logger,
-  }) : super(const RoomState()) {
+  RoomCubit({required this.supabaseService, required this.apiService, required this.logger})
+    : super(const RoomState()) {
     _sub = supabaseService.events.listen(_handleEvent);
   }
 
@@ -38,12 +36,19 @@ class RoomCubit extends Cubit<RoomState> {
       myName = result['name'] as String;
       myColor = result['color'] as String;
       myIsCreator = result['isCreator'] as bool? ?? false;
-      logger.i(
-          '[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator');
+      logger.i('[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator');
+
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+        if (myPlayerId != null) {
+          apiService.heartbeat(roomCode, myPlayerId!).catchError((e) {
+            logger.e('[RoomCubit] heartbeat failed | err=$e');
+          });
+        }
+      });
     } catch (e) {
       logger.e('[RoomCubit] joinRoom failed | err=$e');
-      emit(state.copyWith(
-          status: RoomStatus.error, errorMessage: e.toString()));
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
     }
   }
 
@@ -54,8 +59,18 @@ class RoomCubit extends Cubit<RoomState> {
       await apiService.startGame(state.code, myPlayerId!);
     } catch (e) {
       logger.e('[RoomCubit] startGame failed | err=$e');
-      emit(state.copyWith(
-          status: RoomStatus.error, errorMessage: e.toString()));
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
+    }
+  }
+
+  Future<void> restartGame() async {
+    if (myPlayerId == null) return;
+    logger.i('[RoomCubit] restarting game | roomCode=${state.code}');
+    try {
+      await apiService.restartGame(state.code, myPlayerId!);
+    } catch (e) {
+      logger.e('[RoomCubit] restartGame failed | err=$e');
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
     }
   }
 
@@ -70,9 +85,7 @@ class RoomCubit extends Cubit<RoomState> {
         final playerId = event.data['playerId'] as String?;
         logger.w('[RoomCubit] player disconnected | playerId=$playerId');
         if (playerId != null) {
-          emit(state.copyWith(
-            players: state.players.where((p) => p.id != playerId).toList(),
-          ));
+          emit(state.copyWith(players: state.players.where((p) => p.id != playerId).toList()));
         }
       default:
         break;
@@ -89,19 +102,29 @@ class RoomCubit extends Cubit<RoomState> {
       'finished' => RoomStatus.finished,
       _ => RoomStatus.waiting,
     };
-    logger.i(
-        '[RoomCubit] room:state | status=$statusStr players=${players.length}');
-    emit(state.copyWith(
-      code: data['code'] as String? ?? state.code,
-      subject: data['subject'] as String? ?? state.subject,
-      status: status,
-      maxPlayers: data['maxPlayers'] as int? ?? state.maxPlayers,
-      players: players,
-    ));
+    logger.i('[RoomCubit] room:state | status=$statusStr players=${players.length}');
+    emit(
+      state.copyWith(
+        code: data['code'] as String? ?? state.code,
+        subject: data['subject'] as String? ?? state.subject,
+        status: status,
+        maxPlayers: data['maxPlayers'] as int? ?? state.maxPlayers,
+        players: players,
+      ),
+    );
+
+    // Allow reassignment of creator
+    if (myPlayerId != null) {
+      final me = players.where((p) => p.id == myPlayerId).firstOrNull;
+      if (me != null && me.isCreator != myIsCreator) {
+        myIsCreator = me.isCreator;
+      }
+    }
   }
 
   @override
   Future<void> close() {
+    _heartbeatTimer?.cancel();
     _sub.cancel();
     supabaseService.unsubscribe();
     return super.close();
