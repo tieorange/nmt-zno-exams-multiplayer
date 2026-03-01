@@ -5,6 +5,7 @@ import {
   getPlayers,
   incrementPlayerScore,
   deleteRoom,
+  resetScores,
 } from '../data/repositories/RoomRepository.js';
 import {
   getRandomQuestions,
@@ -92,6 +93,10 @@ export async function restartGame(roomCode: string): Promise<void> {
   });
 
   logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
+
+  // Bug 9 Fix: Zero out scores on restart
+  await resetScores(roomCode);
+
   await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
   await startRound(roomCode, 0, questions);
 }
@@ -143,19 +148,19 @@ export async function submitAnswer(
   answerIndex: number,
 ): Promise<void> {
   const state = roundState.get(roomCode);
-  if (!state) return;
-  if (state.answers.get(playerId) !== null) return; // already answered
+  if (!state) throw new Error('Гру не знайдено або раунд ще не почався');
+  if (state.answers.get(playerId) !== null) throw new Error('Ви вже відповіли на це запитання');
 
   // Validate questionId matches current round
   const currentQuestion = state.questions[state.questionIndex];
-  if (currentQuestion.id !== questionId) return;
+  if (currentQuestion.id !== questionId) throw new Error('Неправильне ID запитання');
 
   // Validate answerIndex is within the actual choices for this question (2–5 choices)
   if (answerIndex < 0 || answerIndex >= currentQuestion.choices.length) {
     logger.warn(
       `[GameEngine] Invalid answerIndex | roomCode=${roomCode} playerId=${playerId} answerIndex=${answerIndex} choicesCount=${currentQuestion.choices.length}`,
     );
-    return;
+    throw new Error('Невірний індекс відповіді');
   }
 
   const room = await getRoom(roomCode);

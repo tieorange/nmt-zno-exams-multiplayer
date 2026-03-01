@@ -29,11 +29,20 @@ export async function getQuestionsByIds(ids: string[]): Promise<Question[]> {
 }
 
 export async function getSubjectCounts(): Promise<Record<string, number>> {
-  const { data, error } = await supabase
-    .from('questions')
-    .select('subject');
-  if (error) throw new Error(`[QuestionRepo] getSubjectCounts failed: ${error.message}`);
+  const subjects = ['ukrainian_language', 'history', 'math', 'geography'];
   const counts: Record<string, number> = {};
-  for (const row of data ?? []) counts[row.subject] = (counts[row.subject] ?? 0) + 1;
+
+  await Promise.all(
+    subjects.map(async (subject) => {
+      const { count, error } = await supabase
+        .from('questions')
+        .select('*', { count: 'exact', head: true })
+        .eq('subject', subject);
+
+      if (error) throw new Error(`[QuestionRepo] getSubjectCounts failed for ${subject}: ${error.message}`);
+      counts[subject] = count ?? 0;
+    })
+  );
+
   return counts;
 }

@@ -21,14 +21,19 @@ function validateRoomCode(req: Request, res: Response, next: NextFunction): void
   }
   next();
 }
+// Async handler to wrap controller functions and catch unhandled promise rejections
+const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => Promise<void> | void) =>
+  (req: Request, res: Response, next: NextFunction) => {
+    Promise.resolve(fn(req, res, next)).catch(next);
+  };
 
-router.get('/subjects', getSubjects);
-router.post('/rooms', roomCreationLimit, createRoom);
-router.get('/rooms/:code', validateRoomCode, getRoomState);
-router.post('/rooms/:code/join', validateRoomCode, joinRoom);
-router.post('/rooms/:code/start', validateRoomCode, startGame);
-router.post('/rooms/:code/answer', validateRoomCode, submitAnswer);
-router.post('/rooms/:code/heartbeat', validateRoomCode, heartbeat);
-router.post('/rooms/:code/restart', validateRoomCode, restartGame);
+router.get('/subjects', asyncHandler(getSubjects));
+router.post('/rooms', roomCreationLimit, asyncHandler(createRoom));
+router.get('/rooms/:code', validateRoomCode, asyncHandler(getRoomState));
+router.post('/rooms/:code/join', validateRoomCode, asyncHandler(joinRoom));
+router.post('/rooms/:code/start', validateRoomCode, asyncHandler(startGame));
+router.post('/rooms/:code/answer', validateRoomCode, asyncHandler(submitAnswer));
+router.post('/rooms/:code/heartbeat', validateRoomCode, asyncHandler(heartbeat));
+router.post('/rooms/:code/restart', validateRoomCode, asyncHandler(restartGame));
 
 export default router;

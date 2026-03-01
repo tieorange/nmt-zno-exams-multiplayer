@@ -69,7 +69,6 @@ export async function joinRoom(req: Request, res: Response) {
     return;
   }
 
-  // Handle re-join prevention if sessionId is provided
   if (sessionId) {
     const existingPlayerId = getPlayerBySession(sessionId);
     if (existingPlayerId) {
@@ -79,12 +78,30 @@ export async function joinRoom(req: Request, res: Response) {
         logger.info(`[RoomController] Player rejoined via session | roomCode=${code} playerId=${existingPlayerId}`);
         // Re-register heartbeat so the player isn't swept as disconnected
         registerPlayerSession(sessionId, existingPlayerId, code);
+
+        // Broadcast room:state so others see this player is back online (if tracked) and sync the rejoining player
+        await broadcastToRoom(code, 'room:state', {
+          code,
+          subject: room.subject,
+          status: room.status,
+          maxPlayers: room.max_players,
+          currentQuestionIndex: room.current_question_index,
+          players: existingPlayers.map((p) => ({
+            id: p.id,
+            name: p.name,
+            color: p.color,
+            score: p.score,
+            isCreator: p.is_creator,
+          })),
+        });
+
         res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator });
         return;
       }
     }
   }
 
+  // Reject new joins if game already started
   if (room.status !== 'waiting') {
     res.status(400).json({ error: 'Гра вже почалась' });
     return;
@@ -130,11 +147,18 @@ export async function joinRoom(req: Request, res: Response) {
 }
 
 export async function heartbeat(req: Request, res: Response) {
+  const code = String(req.params.code).toUpperCase();
   const parsed = HeartbeatSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
     return;
   }
-  pingHeartbeat(parsed.data.playerId);
+
+  const result = pingHeartbeat(parsed.data.playerId, code);
+  if (!result) {
+    res.status(400).json({ error: 'Invalid room or session for heartbeat' });
+    return;
+  }
+
   res.json({ ok: true });
 }

@@ -84,3 +84,8 @@ export async function setCreator(roomCode: string, playerId: string): Promise<vo
   const { error } = await supabase.from('players').update({ is_creator: true }).eq('id', playerId).eq('room_code', roomCode);
   if (error) throw new Error(`[RoomRepo] setCreator failed: ${error.message}`);
 }
+
+export async function resetScores(roomCode: string): Promise<void> {
+  const { error } = await supabase.from('players').update({ score: 0 }).eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] resetScores failed: ${error.message}`);
+}

@@ -28,11 +28,13 @@ export function getPlayerBySession(sessionId: string): string | undefined {
     return sessions.get(sessionId)?.playerId;
 }
 
-export function pingHeartbeat(playerId: string) {
+export function pingHeartbeat(playerId: string, roomCode: string): boolean {
     const session = pings.get(playerId);
-    if (session) {
+    if (session && session.roomCode === roomCode) {
         session.lastPing = Date.now();
+        return true;
     }
+    return false;
 }
 
 const DISCONNECT_TIMEOUT_MS = 60000;
@@ -41,7 +43,9 @@ setInterval(() => {
     const now = Date.now();
     for (const [playerId, session] of pings.entries()) {
         if (now - session.lastPing > DISCONNECT_TIMEOUT_MS) {
-            handlePlayerDisconnect(playerId, session.roomCode).catch(e => logger.error(`Error in handlePlayerDisconnect: ${e}`));
+            handlePlayerDisconnect(playerId, session.roomCode).catch(e => {
+                logger.error(`[PlayerManager] Error in handlePlayerDisconnect for ${playerId}: ${e}`);
+            });
         }
     }
 }, 30000);

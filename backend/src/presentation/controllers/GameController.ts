@@ -50,8 +50,13 @@ export async function submitAnswer(req: Request, res: Response) {
   logger.info(
     `[GameController] answer | roomCode=${code} playerId=${playerId} answerIndex=${answerIndex}`,
   );
-  await engineSubmitAnswer(code, playerId, questionId, answerIndex);
-  res.json({ ok: true });
+  try {
+    await engineSubmitAnswer(code, playerId, questionId, answerIndex);
+    res.json({ ok: true });
+  } catch (err: any) {
+    logger.warn(`[GameController] Invalid answer | roomCode=${code} err=${err.message}`);
+    res.status(400).json({ error: err.message || 'Помилка валідації відповіді' });
+  }
 }
 
 export async function restartGame(req: Request, res: Response) {
