@@ -7,8 +7,7 @@ class GameCubit extends Cubit<GameState> {
   final ApiService apiService;
   final Logger logger;
 
-  GameCubit({required this.apiService, required this.logger})
-      : super(const GameInitial());
+  GameCubit({required this.apiService, required this.logger}) : super(const GameInitial());
 
   Future<void> createRoom(String subject, int maxPlayers) async {
     emit(const GameCreating());
@@ -19,9 +18,7 @@ class GameCubit extends Cubit<GameState> {
       emit(GameCreated(code));
     } catch (e) {
       logger.e('[GameCubit] ERROR create room failed | err=$e');
-      emit(const GameError('Не вдалося створити кімнату. Перевірте з\'єднання.'));
+      emit(const GameError('Не вдалося створити кімнату'));
     }
   }
-
-  void reset() => emit(const GameInitial());
 }

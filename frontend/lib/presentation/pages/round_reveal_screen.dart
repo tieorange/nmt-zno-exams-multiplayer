@@ -1,7 +1,6 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../cubits/quiz_cubit/quiz_cubit.dart';
 import '../cubits/quiz_cubit/quiz_state.dart';
@@ -18,197 +17,142 @@ class RoundRevealScreen extends StatefulWidget {
 }
 
 class _RoundRevealScreenState extends State<RoundRevealScreen> {
-  Timer? _autoAdvance;
-
   @override
   void initState() {
     super.initState();
-    // Auto-advance after 4 seconds
-    _autoAdvance = Timer(const Duration(seconds: 4), _advance);
-  }
-
-  @override
-  void dispose() {
-    _autoAdvance?.cancel();
-    super.dispose();
-  }
-
-  void _advance() {
-    if (!mounted) return;
-    final quizState = context.read<QuizCubit>().state;
-    if (quizState is QuizGameEnded) {
-      context.go('/room/${widget.roomCode}/results');
-    } else {
-      context.go('/room/${widget.roomCode}/game');
-    }
+    // Auto-navigate after 3 seconds
+    Future.delayed(const Duration(seconds: 3), () {
+      if (!mounted) return;
+      final quizState = context.read<QuizCubit>().state;
+      if (quizState is QuizGameEnded) {
+        context.go('/room/${widget.roomCode}/results');
+      } else {
+        context.go('/room/${widget.roomCode}/game');
+      }
+    });
   }
 
   @override
   Widget build(BuildContext context) {
-    return BlocConsumer<QuizCubit, QuizState>(
-      listener: (ctx, state) {
-        // If a new question arrives, navigate immediately
-        if (state is QuizQuestion) {
-          _autoAdvance?.cancel();
-          ctx.go('/room/${widget.roomCode}/game');
-        } else if (state is QuizGameEnded) {
-          _autoAdvance?.cancel();
-          ctx.go('/room/${widget.roomCode}/results');
-        }
-      },
+    return BlocBuilder<QuizCubit, QuizState>(
       builder: (ctx, state) {
-        if (state is! QuizReveal) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+        final rev = state is QuizReveal ? state : null;
+        if (rev == null) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
-
-        final myPlayerId = ctx.read<RoomCubit>().myPlayerId;
-        final isCorrect = state.myAnswer == state.correctIndex;
+        final isCorrect = rev.myAnswer == rev.correctIndex;
 
         return Scaffold(
           body: SafeArea(
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(24),
               child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Result header
-                  Center(
-                    child: Column(
+                  // Result banner
+                  Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: isCorrect ? Colors.green.shade900 : Colors.red.shade900,
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Column(
+                          children: [
+                            Text(
+                              isCorrect ? '✅ Правильно!' : '❌ Помилка',
+                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                            ),
+                            if (isCorrect)
+                              const Text(
+                                '+10 балів',
+                                style: TextStyle(fontSize: 18, color: Colors.greenAccent),
+                              ),
+                          ],
+                        ),
+                      )
+                      .animate()
+                      .fadeIn(duration: const Duration(milliseconds: 400))
+                      .scale(begin: const Offset(0.8, 0.8)),
+                  const SizedBox(height: 20),
+                  // Question recap
+                  Text(
+                    rev.question.text,
+                    style: TextStyle(fontSize: 16, color: Colors.white.withValues(alpha: 0.7)),
+                  ),
+                  const SizedBox(height: 16),
+                  // Answer buttons with reveal states
+                  ...List.generate(rev.question.choices.length, (i) {
+                    AnswerState answerState;
+                    if (i == rev.correctIndex) {
+                      answerState = AnswerState.correct;
+                    } else if (i == rev.myAnswer && rev.myAnswer != rev.correctIndex) {
+                      answerState = AnswerState.wrong;
+                    } else {
+                      answerState = AnswerState.idle;
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: AnswerButton(text: rev.question.choices[i], state: answerState)
+                          .animate()
+                          .fadeIn(
+                            delay: Duration(milliseconds: i * 100),
+                            duration: const Duration(milliseconds: 300),
+                          )
+                          .slideX(begin: 0.1),
+                    );
+                  }),
+                  const Spacer(),
+                  // Player scores
+                  BlocBuilder<RoomCubit, RoomState>(
+                    builder: (_, roomState) => Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Icon(
-                          isCorrect ? Icons.check_circle : Icons.cancel,
-                          size: 64,
-                          color: isCorrect
-                              ? Colors.greenAccent
-                              : Colors.redAccent,
-                        )
-                            .animate()
-                            .scale(
-                                begin: const Offset(0, 0),
-                                end: const Offset(1, 1),
-                                duration: 400.ms,
-                                curve: Curves.elasticOut),
-                        const SizedBox(height: 12),
-                        Text(
-                          isCorrect ? 'Правильно! +10' : 'Неправильно',
-                          style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.bold,
-                            color: isCorrect
-                                ? Colors.greenAccent
-                                : Colors.redAccent,
-                          ),
-                        )
-                            .animate()
-                            .fadeIn(delay: 200.ms)
-                            .slideY(begin: 0.3, end: 0),
+                        const Text(
+                          'Рахунок:',
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                        ),
+                        const SizedBox(height: 8),
+                        ...roomState.players.map((p) {
+                          final score = rev.scores[p.id] ?? p.score;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 12,
+                                  backgroundColor: Color(
+                                    int.parse(p.color.replaceFirst('#', '0xFF')),
+                                  ),
+                                  child: Text(
+                                    p.name[0],
+                                    style: const TextStyle(fontSize: 10, color: Colors.white),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(p.name),
+                                const Spacer(),
+                                Text(
+                                  '$score балів',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    color: Color(0xFF4ECDC4),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        }),
                       ],
                     ),
                   ),
-                  const SizedBox(height: 24),
-
-                  // Question text
-                  Text(
-                    state.question.text,
-                    style: const TextStyle(fontSize: 16, height: 1.4),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Text(
+                      'Наступне питання через 3 секунди…',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13),
+                    ),
                   ),
-                  const SizedBox(height: 16),
-
-                  // Answer choices with highlights
-                  ...List.generate(state.question.choices.length, (i) {
-                    AnswerButtonState btnState;
-                    if (i == state.correctIndex) {
-                      btnState = AnswerButtonState.correct;
-                    } else if (i == state.myAnswer &&
-                        state.myAnswer != state.correctIndex) {
-                      btnState = AnswerButtonState.wrong;
-                    } else {
-                      btnState = AnswerButtonState.idle;
-                    }
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 8),
-                      child: AnswerButton(
-                        text: state.question.choices[i],
-                        state: btnState,
-                      ),
-                    );
-                  }),
-                  const SizedBox(height: 16),
-
-                  // Scoreboard
-                  BlocBuilder<RoomCubit, RoomState>(
-                    builder: (ctx, roomState) {
-                      if (roomState.players.isEmpty) return const SizedBox();
-                      final sorted = [...roomState.players]
-                        ..sort((a, b) =>
-                            (state.scores[b.id] ?? b.score)
-                                .compareTo(state.scores[a.id] ?? a.score));
-                      return Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Рахунок',
-                            style: TextStyle(
-                                fontWeight: FontWeight.bold, fontSize: 15),
-                          ),
-                          const SizedBox(height: 8),
-                          ...sorted.map((p) {
-                            final score = state.scores[p.id] ?? p.score;
-                            final color = _parseColor(p.color);
-                            final isMe = p.id == myPlayerId;
-                            return Padding(
-                              padding: const EdgeInsets.only(bottom: 6),
-                              child: Row(
-                                children: [
-                                  CircleAvatar(
-                                    radius: 16,
-                                    backgroundColor: color,
-                                    child: Text(
-                                      p.name.isNotEmpty ? p.name[0] : '?',
-                                      style: const TextStyle(
-                                          fontSize: 12,
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  Expanded(
-                                    child: Text(
-                                      '${p.name}${isMe ? ' (ти)' : ''}',
-                                      style: TextStyle(
-                                        fontWeight: isMe
-                                            ? FontWeight.bold
-                                            : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    '$score',
-                                    style: const TextStyle(
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 16,
-                                        color: Color(0xFF4ECDC4)),
-                                  ),
-                                ],
-                              ),
-                            );
-                          }),
-                        ],
-                      );
-                    },
-                  ),
-
-                  const Spacer(),
-                  const Text(
-                    'Наступне питання через кілька секунд...',
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white38, fontSize: 12),
-                  ),
-                  const SizedBox(height: 8),
                 ],
               ),
             ),
@@ -216,13 +160,5 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
         );
       },
     );
-  }
-
-  Color _parseColor(String hex) {
-    try {
-      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
-    } catch (_) {
-      return Colors.teal;
-    }
   }
 }

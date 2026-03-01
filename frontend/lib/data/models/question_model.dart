@@ -12,9 +12,9 @@ class ClientQuestion {
   });
 
   factory ClientQuestion.fromJson(Map<String, dynamic> json) => ClientQuestion(
-        id: json['id'] as String,
-        subject: json['subject'] as String,
-        text: json['text'] as String,
-        choices: List<String>.from(json['choices'] as List),
-      );
+    id: json['id'] as String,
+    subject: json['subject'] as String,
+    text: json['text'] as String,
+    choices: List<String>.from(json['choices'] as List),
+  );
 }

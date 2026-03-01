@@ -1,25 +1,17 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 import 'package:logger/logger.dart';
-import 'package:uuid/uuid.dart';
 
 /// Handles all client→server REST calls to the Node.js backend.
 class ApiService {
   final String baseUrl;
   final Logger logger;
-  final String sessionId;
 
   ApiService({required this.logger})
-      : baseUrl = const String.fromEnvironment(
-          'API_URL',
-          defaultValue: 'http://localhost:3000',
-        ),
-        sessionId = const Uuid().v4();
+    : baseUrl = const String.fromEnvironment('API_URL', defaultValue: 'http://localhost:3000');
 
-  Future<Map<String, dynamic>> createRoom(
-      String subject, int maxPlayers) async {
-    logger
-        .i('[ApiService] POST /api/rooms | subject=$subject maxPlayers=$maxPlayers');
+  Future<Map<String, dynamic>> createRoom(String subject, int maxPlayers) async {
+    logger.i('[ApiService] POST /api/rooms | subject=$subject maxPlayers=$maxPlayers');
     final res = await http.post(
       Uri.parse('$baseUrl/api/rooms'),
       headers: {'Content-Type': 'application/json'},
@@ -31,11 +23,10 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> joinRoom(String roomCode) async {
-    logger.i('[ApiService] POST /api/rooms/$roomCode/join | sessionId=$sessionId');
+    logger.i('[ApiService] POST /api/rooms/$roomCode/join');
     final res = await http.post(
       Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/join'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'sessionId': sessionId}),
     );
     if (res.statusCode != 200) throw Exception('joinRoom failed: ${res.body}');
     return jsonDecode(res.body) as Map<String, dynamic>;
@@ -43,8 +34,7 @@ class ApiService {
   }
 
   Future<void> startGame(String roomCode, String playerId) async {
-    logger.i(
-        '[ApiService] POST /api/rooms/$roomCode/start | playerId=$playerId');
+    logger.i('[ApiService] POST /api/rooms/$roomCode/start | playerId=$playerId');
     final res = await http.post(
       Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/start'),
       headers: {'Content-Type': 'application/json'},
@@ -53,29 +43,15 @@ class ApiService {
     if (res.statusCode != 200) throw Exception('startGame failed: ${res.body}');
   }
 
-  Future<void> restartGame(String roomCode, String playerId) async {
-    logger.i('[ApiService] POST /api/rooms/$roomCode/restart | playerId=$playerId');
-    final res = await http.post(
-      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/restart'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'playerId': playerId}),
-    );
-    if (res.statusCode != 200) throw Exception('restartGame failed: ${res.body}');
-  }
-
-  Future<void> heartbeat(String roomCode, String playerId) async {
-    final res = await http.post(
-      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/heartbeat'),
-      headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'playerId': playerId}),
-    );
-    if (res.statusCode != 200) throw Exception('heartbeat failed: ${res.body}');
-  }
-
   Future<void> submitAnswer(
-      String roomCode, String playerId, String questionId, int answerIndex) async {
+    String roomCode,
+    String playerId,
+    String questionId,
+    int answerIndex,
+  ) async {
     logger.i(
-        '[ApiService] POST /api/rooms/$roomCode/answer | playerId=$playerId answerIndex=$answerIndex');
+      '[ApiService] POST /api/rooms/$roomCode/answer | playerId=$playerId answerIndex=$answerIndex',
+    );
     final res = await http.post(
       Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/answer'),
       headers: {'Content-Type': 'application/json'},
@@ -85,25 +61,12 @@ class ApiService {
         'answerIndex': answerIndex,
       }),
     );
-    if (res.statusCode != 200) {
-      throw Exception('submitAnswer failed: ${res.body}');
-    }
-  }
-
-  Future<Map<String, dynamic>> getRoomState(String roomCode) async {
-    final res = await http
-        .get(Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}'));
-    if (res.statusCode != 200) {
-      throw Exception('getRoomState failed: ${res.body}');
-    }
-    return jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode != 200) throw Exception('submitAnswer failed: ${res.body}');
   }
 
   Future<List<Map<String, dynamic>>> getSubjects() async {
     final res = await http.get(Uri.parse('$baseUrl/api/subjects'));
-    if (res.statusCode != 200) {
-      throw Exception('getSubjects failed: ${res.body}');
-    }
+    if (res.statusCode != 200) throw Exception('getSubjects failed: ${res.body}');
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return List<Map<String, dynamic>>.from(data['subjects'] as List);
   }

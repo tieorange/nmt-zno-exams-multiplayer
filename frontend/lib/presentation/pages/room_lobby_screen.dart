@@ -1,10 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../cubits/room_cubit/room_cubit.dart';
 import '../cubits/room_cubit/room_state.dart';
-import '../cubits/quiz_cubit/quiz_cubit.dart';
+import '../widgets/player_chip.dart';
 
 class RoomLobbyScreen extends StatefulWidget {
   final String roomCode;
@@ -15,17 +16,11 @@ class RoomLobbyScreen extends StatefulWidget {
 }
 
 class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
-  bool _joining = false;
-
   @override
   void initState() {
     super.initState();
-    // Auto-join on first build
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!_joining) {
-        _joining = true;
-        context.read<RoomCubit>().joinRoom(widget.roomCode);
-      }
+      context.read<RoomCubit>().joinRoom(widget.roomCode);
     });
   }
 
@@ -34,192 +29,181 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     return BlocConsumer<RoomCubit, RoomState>(
       listener: (ctx, state) {
         if (state.status == RoomStatus.playing) {
-          // Forward player context to QuizCubit before navigating
-          final cubit = ctx.read<RoomCubit>();
-          if (cubit.myPlayerId != null) {
-            ctx
-                .read<QuizCubit>()
-                .setContext(cubit.myPlayerId!, state.code);
-          }
-          ctx.go('/room/${state.code}/game');
+          ctx.go('/room/${widget.roomCode}/game');
         }
       },
       builder: (ctx, state) {
-        if (state.status == RoomStatus.initial) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
-        }
-
-        if (state.status == RoomStatus.error) {
-          return Scaffold(
-            appBar: AppBar(
-              leading: BackButton(onPressed: () => context.go('/')),
-            ),
-            body: Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.error_outline,
-                      size: 48, color: Colors.redAccent),
-                  const SizedBox(height: 16),
-                  Text(
-                    state.errorMessage ?? 'Помилка з\'єднання',
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton(
-                    onPressed: () => context.go('/'),
-                    child: const Text('На головну'),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
-
-        final cubit = ctx.read<RoomCubit>();
-        final isCreator = cubit.myIsCreator;
-        final canStart = isCreator && state.players.isNotEmpty;
-
         return Scaffold(
-          appBar: AppBar(
-            title: Text('Кімната ${state.code}'),
-            leading: BackButton(onPressed: () => context.go('/')),
-            actions: [
-              IconButton(
-                icon: const Icon(Icons.share),
-                tooltip: 'Поділитися посиланням',
-                onPressed: () {
-                  final url =
-                      '${Uri.base.origin}/room/${state.code}';
-                  Clipboard.setData(ClipboardData(text: url));
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                        content: Text('Посилання скопійовано!')),
-                  );
-                },
+          body: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xFF0D2137), Color(0xFF0D1117)],
               ),
-            ],
-          ),
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 480),
+            ),
+            child: SafeArea(
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    // Room code display
+                    // Header
+                    Row(
+                      children: [
+                        IconButton(
+                          onPressed: () => ctx.go('/'),
+                          icon: const Icon(Icons.arrow_back_ios_new),
+                        ),
+                        const Expanded(
+                          child: Text(
+                            'Кімната очікування',
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                        const SizedBox(width: 48),
+                      ],
+                    ),
+                    const SizedBox(height: 32),
+                    // Room code
                     Container(
-                      padding: const EdgeInsets.all(24),
+                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
                       decoration: BoxDecoration(
-                        color: Theme.of(context)
-                            .colorScheme
-                            .surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(16),
+                        color: const Color(0xFF4ECDC4).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: const Color(0xFF4ECDC4).withValues(alpha: 0.4),
+                          width: 1.5,
+                        ),
                       ),
                       child: Column(
                         children: [
                           Text(
                             'Код кімнати',
-                            style: Theme.of(context)
-                                .textTheme
-                                .bodySmall
-                                ?.copyWith(color: Colors.white54),
-                          ),
-                          const SizedBox(height: 8),
-                          Text(
-                            state.code,
-                            style: Theme.of(context)
-                                .textTheme
-                                .displayMedium
-                                ?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                  color: const Color(0xFF4ECDC4),
-                                  letterSpacing: 8,
-                                ),
+                            style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
                           ),
                           const SizedBox(height: 4),
-                          Text(
-                            'Предмет: ${_subjectLabel(state.subject)}',
-                            style: const TextStyle(
-                                color: Colors.white54, fontSize: 13),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                widget.roomCode,
+                                style: const TextStyle(
+                                  fontSize: 48,
+                                  fontWeight: FontWeight.w900,
+                                  color: Color(0xFF4ECDC4),
+                                  letterSpacing: 12,
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              IconButton(
+                                onPressed: () {
+                                  Clipboard.setData(ClipboardData(text: widget.roomCode));
+                                  ScaffoldMessenger.of(ctx).showSnackBar(
+                                    const SnackBar(
+                                      content: Text('Код скопійовано!'),
+                                      duration: Duration(seconds: 1),
+                                    ),
+                                  );
+                                },
+                                icon: const Icon(Icons.copy, color: Color(0xFF4ECDC4)),
+                              ),
+                            ],
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 24),
-                    // Players list
-                    Text(
-                      'Гравці (${state.players.length}/${state.maxPlayers})',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    ).animate().fadeIn(duration: 500.ms).scale(begin: const Offset(0.9, 0.9)),
+                    const SizedBox(height: 32),
+                    // Player count
+                    Row(
+                      children: [
+                        Text(
+                          'Гравці (${state.players.length}/${state.maxPlayers})',
+                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                        ),
+                        const Spacer(),
+                        if (state.status == RoomStatus.waiting)
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: Colors.orange.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: const [
+                                SizedBox(
+                                  width: 8,
+                                  height: 8,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.orange,
+                                  ),
+                                ),
+                                SizedBox(width: 6),
+                                Text(
+                                  'Очікування',
+                                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                                ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                     const SizedBox(height: 12),
-                    Expanded(
-                      child: state.players.isEmpty
-                          ? const Center(
-                              child: Text(
-                              'Очікування гравців...',
-                              style: TextStyle(color: Colors.white38),
-                            ))
-                          : ListView.builder(
-                              itemCount: state.players.length,
-                              itemBuilder: (_, i) {
-                                final p = state.players[i];
-                                final color = _parseColor(p.color);
-                                final isMe = p.id == cubit.myPlayerId;
-                                return ListTile(
-                                  leading: CircleAvatar(
-                                    backgroundColor: color,
-                                    child: Text(
-                                      p.name.isNotEmpty
-                                          ? p.name[0]
-                                          : '?',
-                                      style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold),
-                                    ),
-                                  ),
-                                  title: Text(
-                                    '${p.name}${isMe ? ' (ти)' : ''}',
-                                    style: TextStyle(
-                                      fontWeight: isMe
-                                          ? FontWeight.bold
-                                          : FontWeight.normal,
-                                    ),
-                                  ),
-                                  trailing: p.isCreator
-                                      ? const Chip(
-                                          label: Text('Організатор',
-                                              style: TextStyle(fontSize: 11)),
-                                          padding: EdgeInsets.zero,
-                                          visualDensity:
-                                              VisualDensity.compact,
-                                        )
-                                      : null,
-                                );
-                              },
-                            ),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: state.players
+                          .map(
+                            (p) => PlayerChip(player: p)
+                                .animate()
+                                .fadeIn(duration: 300.ms)
+                                .scale(begin: const Offset(0.7, 0.7)),
+                          )
+                          .toList(),
                     ),
-                    const SizedBox(height: 16),
-                    if (isCreator)
-                      FilledButton(
-                        onPressed: canStart
-                            ? () => ctx.read<RoomCubit>().startGame()
-                            : null,
-                        style: FilledButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 16),
+                    const Spacer(),
+                    if (state.status == RoomStatus.error)
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: Text(
+                          state.errorMessage ?? 'Сталася помилка',
+                          style: const TextStyle(color: Colors.redAccent),
                         ),
-                        child: const Text('Почати гру'),
-                      )
-                    else
-                      const Text(
-                        'Очікуємо, доки організатор почне гру...',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.white54),
                       ),
-                    const SizedBox(height: 16),
+                    // Start button (creator only)
+                    BlocBuilder<RoomCubit, RoomState>(
+                      builder: (ctx, _) {
+                        final cubit = ctx.read<RoomCubit>();
+                        if (!cubit.myIsCreator) {
+                          return const Text(
+                            'Очікуємо, поки творець почне гру…',
+                            style: TextStyle(color: Colors.white54),
+                            textAlign: TextAlign.center,
+                          );
+                        }
+                        return SizedBox(
+                          width: double.infinity,
+                          child: FilledButton(
+                            onPressed: state.players.isNotEmpty ? () => cubit.startGame() : null,
+                            style: FilledButton.styleFrom(
+                              backgroundColor: const Color(0xFF4ECDC4),
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(vertical: 18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(16),
+                              ),
+                            ),
+                            child: const Text(
+                              'Почати гру 🚀',
+                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ],
                 ),
               ),
@@ -228,23 +212,5 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
         );
       },
     );
-  }
-
-  String _subjectLabel(String key) {
-    return switch (key) {
-      'ukrainian_language' => 'Українська мова',
-      'history' => 'Історія України',
-      'geography' => 'Географія',
-      'math' => 'Математика',
-      _ => key,
-    };
-  }
-
-  Color _parseColor(String hex) {
-    try {
-      return Color(int.parse(hex.replaceFirst('#', '0xFF')));
-    } catch (_) {
-      return Colors.teal;
-    }
   }
 }

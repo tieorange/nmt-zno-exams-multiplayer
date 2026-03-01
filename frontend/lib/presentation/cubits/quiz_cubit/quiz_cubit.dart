@@ -10,7 +10,7 @@ class QuizCubit extends Cubit<QuizState> {
   final SupabaseService supabaseService;
   final ApiService apiService;
   final Logger logger;
-  late final StreamSubscription<RealtimeEvent> _sub;
+  late StreamSubscription<RealtimeEvent> _sub;
   Timer? _timer;
   ClientQuestion? _currentQuestion;
   String? _myPlayerId;
@@ -18,14 +18,8 @@ class QuizCubit extends Cubit<QuizState> {
   int _questionIndex = 0;
   int _totalQuestions = 10;
 
-  // Round timer duration — matches ROUND_TIMER_MS on the server (default 5 min)
-  static const _roundDuration = Duration(minutes: 5);
-
-  QuizCubit({
-    required this.supabaseService,
-    required this.apiService,
-    required this.logger,
-  }) : super(const QuizInitial()) {
+  QuizCubit({required this.supabaseService, required this.apiService, required this.logger})
+    : super(const QuizInitial()) {
     _sub = supabaseService.events.listen(_handleEvent);
   }
 
@@ -39,19 +33,25 @@ class QuizCubit extends Cubit<QuizState> {
       case RealtimeEventType.gameStart:
         _totalQuestions = event.data['totalQuestions'] as int? ?? 10;
         _questionIndex = 0;
+        break;
       case RealtimeEventType.questionNew:
         _handleNewQuestion(event.data);
+        break;
       case RealtimeEventType.roundUpdate:
         _handleRoundUpdate(event.data);
+        break;
       case RealtimeEventType.roundReveal:
         _handleReveal(event.data);
+        break;
       case RealtimeEventType.gameEnd:
         logger.i('[QuizCubit] game ended | scoreboard=${event.data['scoreboard']}');
         _timer?.cancel();
-        emit(QuizGameEnded(
-          scoreboard: List<Map<String, dynamic>>.from(
-              event.data['scoreboard'] as List),
-        ));
+        emit(
+          QuizGameEnded(
+            scoreboard: List<Map<String, dynamic>>.from(event.data['scoreboard'] as List),
+          ),
+        );
+        break;
       default:
         break;
     }
@@ -61,21 +61,23 @@ class QuizCubit extends Cubit<QuizState> {
     _questionIndex++;
     _currentQuestion = ClientQuestion.fromJson(data);
     logger.i(
-        '[QuizCubit] question:new received | questionId=${_currentQuestion!.id} '
-        'choicesCount=${_currentQuestion!.choices.length} timerMs=300000');
+      '[QuizCubit] question:new received | questionId=${_currentQuestion!.id} choicesCount=${_currentQuestion!.choices.length} timerMs=300000',
+    );
 
-    emit(QuizQuestion(
-      question: _currentQuestion!,
-      questionIndex: _questionIndex,
-      totalQuestions: _totalQuestions,
-      timeRemaining: _roundDuration,
-    ));
+    emit(
+      QuizQuestion(
+        question: _currentQuestion!,
+        questionIndex: _questionIndex,
+        totalQuestions: _totalQuestions,
+        timeRemaining: const Duration(minutes: 5),
+      ),
+    );
     _startTimer();
   }
 
   void _startTimer() {
     _timer?.cancel();
-    var remaining = _roundDuration;
+    var remaining = const Duration(minutes: 5);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       remaining -= const Duration(seconds: 1);
       if (remaining.isNegative) {
@@ -103,28 +105,29 @@ class QuizCubit extends Cubit<QuizState> {
     final myAnswer = _myPlayerId != null ? answers[_myPlayerId] : null;
 
     logger.i(
-        '[QuizCubit] round:reveal received | correctIndex=$correctIndex '
-        'myAnswer=$myAnswer isCorrect=${myAnswer == correctIndex} '
-        'scoreGained=${myAnswer == correctIndex ? 10 : 0}');
-    emit(QuizReveal(
-      question: _currentQuestion!,
-      correctIndex: correctIndex,
-      playerAnswers: answers,
-      scores: scores,
-      myAnswer: myAnswer,
-    ));
+      '[QuizCubit] round:reveal received | correctIndex=$correctIndex myAnswer=$myAnswer isCorrect=${myAnswer == correctIndex} scoreGained=${myAnswer == correctIndex ? 10 : 0}',
+    );
+    emit(
+      QuizReveal(
+        question: _currentQuestion!,
+        correctIndex: correctIndex,
+        playerAnswers: answers,
+        scores: scores,
+        myAnswer: myAnswer,
+      ),
+    );
   }
 
   Future<void> submitAnswer(int answerIndex) async {
     final s = state;
     if (s is! QuizQuestion || _myPlayerId == null || _roomCode == null) return;
     logger.i(
-        '[QuizCubit] answer submitted | questionId=${s.question.id} selectedIndex=$answerIndex');
+      '[QuizCubit] answer submitted | questionId=${s.question.id} selectedIndex=$answerIndex',
+    );
     // Optimistic UI update — lock button immediately
     emit(s.copyWith(myAnswer: answerIndex));
-    // Send to Node.js REST (server validates and scores)
-    await apiService.submitAnswer(
-        _roomCode!, _myPlayerId!, s.question.id, answerIndex);
+    // Send to Node.js REST (not via Supabase — server must validate)
+    await apiService.submitAnswer(_roomCode!, _myPlayerId!, s.question.id, answerIndex);
   }
 
   @override

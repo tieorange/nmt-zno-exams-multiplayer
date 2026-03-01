@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:logger/logger.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'config/router.dart';
 import 'services/supabase_service.dart';
 import 'services/api_service.dart';
@@ -29,7 +30,7 @@ void main() async {
     logger: logger,
   );
 
-  // Forward playerId + roomCode to QuizCubit after join
+  // Forward playerId + roomCode to QuizCubit after join so it can track "my" answer
   roomCubit.stream.listen((_) {
     if (roomCubit.myPlayerId != null && roomCubit.state.code.isNotEmpty) {
       quizCubit.setContext(roomCubit.myPlayerId!, roomCubit.state.code);
@@ -55,12 +56,20 @@ class NmtQuizApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final base = ThemeData.dark(useMaterial3: true);
     return MaterialApp.router(
       title: 'НМТ Квіз',
-      theme: ThemeData.dark(useMaterial3: true).copyWith(
+      theme: base.copyWith(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xFF4ECDC4),
           brightness: Brightness.dark,
+        ),
+        textTheme: GoogleFonts.interTextTheme(base.textTheme),
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
+        cardTheme: CardThemeData(
+          color: const Color(0xFF161B22),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          elevation: 0,
         ),
       ),
       routerConfig: goRouter,

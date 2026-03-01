@@ -27,17 +27,15 @@ class RoomState extends Equatable {
     int? maxPlayers,
     List<PlayerModel>? players,
     String? errorMessage,
-  }) =>
-      RoomState(
-        code: code ?? this.code,
-        subject: subject ?? this.subject,
-        status: status ?? this.status,
-        maxPlayers: maxPlayers ?? this.maxPlayers,
-        players: players ?? this.players,
-        errorMessage: errorMessage,
-      );
+  }) => RoomState(
+    code: code ?? this.code,
+    subject: subject ?? this.subject,
+    status: status ?? this.status,
+    maxPlayers: maxPlayers ?? this.maxPlayers,
+    players: players ?? this.players,
+    errorMessage: errorMessage,
+  );
 
   @override
-  List<Object?> get props =>
-      [code, subject, status, maxPlayers, players, errorMessage];
+  List<Object?> get props => [code, subject, status, maxPlayers, players, errorMessage];
 }

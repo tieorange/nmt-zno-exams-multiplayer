@@ -32,19 +32,17 @@ class QuizQuestion extends QuizState {
     Duration? timeRemaining,
     int? myAnswer,
     Map<String, int?>? playerAnswers,
-  }) =>
-      QuizQuestion(
-        question: question,
-        questionIndex: questionIndex,
-        totalQuestions: totalQuestions,
-        timeRemaining: timeRemaining ?? this.timeRemaining,
-        myAnswer: myAnswer ?? this.myAnswer,
-        playerAnswers: playerAnswers ?? this.playerAnswers,
-      );
+  }) => QuizQuestion(
+    question: question,
+    questionIndex: questionIndex,
+    totalQuestions: totalQuestions,
+    timeRemaining: timeRemaining ?? this.timeRemaining,
+    myAnswer: myAnswer ?? this.myAnswer,
+    playerAnswers: playerAnswers ?? this.playerAnswers,
+  );
 
   @override
-  List<Object?> get props =>
-      [question, questionIndex, timeRemaining, myAnswer, playerAnswers];
+  List<Object?> get props => [question, questionIndex, timeRemaining, myAnswer, playerAnswers];
 }
 
 class QuizReveal extends QuizState {
@@ -63,8 +61,7 @@ class QuizReveal extends QuizState {
   });
 
   @override
-  List<Object?> get props =>
-      [question, correctIndex, playerAnswers, scores, myAnswer];
+  List<Object?> get props => [question, correctIndex, playerAnswers, scores, myAnswer];
 }
 
 class QuizGameEnded extends QuizState {

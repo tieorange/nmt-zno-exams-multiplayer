@@ -4,30 +4,18 @@ import '../../data/models/player_model.dart';
 class PlayerChip extends StatelessWidget {
   final PlayerModel player;
   final bool hasAnswered;
-  final bool isMe;
 
-  const PlayerChip({
-    super.key,
-    required this.player,
-    this.hasAnswered = false,
-    this.isMe = false,
-  });
+  const PlayerChip({super.key, required this.player, this.hasAnswered = false});
 
-  Color get _color {
-    try {
-      return Color(int.parse(player.color.replaceFirst('#', '0xFF')));
-    } catch (_) {
-      return Colors.teal;
-    }
-  }
+  Color get _color => Color(int.parse(player.color.replaceFirst('#', '0xFF')));
 
   @override
   Widget build(BuildContext context) {
     return AnimatedContainer(
       duration: const Duration(milliseconds: 300),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: _color.withAlpha(38),
+        color: _color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: hasAnswered ? _color : Colors.white24,
@@ -38,24 +26,15 @@ class PlayerChip extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           CircleAvatar(
-            radius: 12,
+            radius: 14,
             backgroundColor: _color,
-            child: Text(
-              player.name.isNotEmpty ? player.name[0] : '?',
-              style: const TextStyle(
-                  fontSize: 11,
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold),
-            ),
+            child: Text(player.name[0], style: const TextStyle(fontSize: 12, color: Colors.white)),
           ),
           const SizedBox(width: 6),
-          Text(
-            '${player.name}${isMe ? ' (ти)' : ''}',
-            style: const TextStyle(fontSize: 12),
-          ),
+          Text(player.name, style: const TextStyle(fontSize: 13)),
           if (hasAnswered) ...[
             const SizedBox(width: 4),
-            const Icon(Icons.check_circle, size: 13, color: Colors.greenAccent),
+            const Icon(Icons.check_circle, size: 14, color: Colors.greenAccent),
           ],
         ],
       ),

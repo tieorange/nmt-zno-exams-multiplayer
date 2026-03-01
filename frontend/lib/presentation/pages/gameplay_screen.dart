@@ -1,13 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 import '../cubits/quiz_cubit/quiz_cubit.dart';
 import '../cubits/quiz_cubit/quiz_state.dart';
 import '../cubits/room_cubit/room_cubit.dart';
 import '../cubits/room_cubit/room_state.dart';
-import '../widgets/timer_bar.dart';
 import '../widgets/answer_button.dart';
 import '../widgets/player_chip.dart';
+import '../widgets/timer_bar.dart';
 
 class GameplayScreen extends StatelessWidget {
   final String roomCode;
@@ -15,7 +16,7 @@ class GameplayScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return BlocListener<QuizCubit, QuizState>(
+    return BlocConsumer<QuizCubit, QuizState>(
       listener: (ctx, state) {
         if (state is QuizReveal) {
           ctx.go('/room/$roomCode/reveal');
@@ -23,130 +24,101 @@ class GameplayScreen extends StatelessWidget {
           ctx.go('/room/$roomCode/results');
         }
       },
-      child: Scaffold(
-        body: BlocBuilder<QuizCubit, QuizState>(
-          builder: (ctx, quizState) {
-            if (quizState is QuizInitial) {
-              return const Center(
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    CircularProgressIndicator(),
-                    SizedBox(height: 16),
-                    Text('Завантаження питання...'),
-                  ],
-                ),
-              );
-            }
-
-            if (quizState is! QuizQuestion) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            return _GameplayBody(
-              roomCode: roomCode,
-              state: quizState,
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-class _GameplayBody extends StatelessWidget {
-  final String roomCode;
-  final QuizQuestion state;
-
-  const _GameplayBody({required this.roomCode, required this.state});
-
-  @override
-  Widget build(BuildContext context) {
-    final myPlayerId = context.read<RoomCubit>().myPlayerId;
-
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            // Progress + timer
-            Row(
-              children: [
-                Text(
-                  'Питання ${state.questionIndex}/${state.totalQuestions}',
-                  style: const TextStyle(color: Colors.white54, fontSize: 13),
-                ),
-                const Spacer(),
-              ],
-            ),
-            const SizedBox(height: 8),
-            TimerBar(remaining: state.timeRemaining),
-            const SizedBox(height: 20),
-
-            // Question text
-            Expanded(
-              child: SingleChildScrollView(
-                child: Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(16),
+      builder: (ctx, state) {
+        final q = state is QuizQuestion ? state : null;
+        if (q == null) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        return Scaffold(
+          body: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Progress & Timer
+                  Row(
+                    children: [
+                      Text(
+                        'Питання ${q.questionIndex}/${q.totalQuestions}',
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+                      ),
+                      const Spacer(),
+                    ],
                   ),
-                  child: Text(
-                    state.question.text,
-                    style: const TextStyle(fontSize: 18, height: 1.5),
+                  const SizedBox(height: 8),
+                  TimerBar(remaining: q.timeRemaining),
+                  const SizedBox(height: 20),
+                  // Question card
+                  Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(20),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF161B22),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: Text(
+                          q.question.text,
+                          style: const TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                            height: 1.5,
+                          ),
+                        ),
+                      )
+                      .animate()
+                      .fadeIn(duration: const Duration(milliseconds: 400))
+                      .slideY(begin: -0.1),
+                  const SizedBox(height: 20),
+                  // Answer buttons
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: q.question.choices.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (ctx, i) {
+                        AnswerState answerState = AnswerState.idle;
+                        if (q.myAnswer != null) {
+                          answerState = q.myAnswer == i ? AnswerState.selected : AnswerState.idle;
+                        }
+                        return AnswerButton(
+                              text: q.question.choices[i],
+                              state: answerState,
+                              onTap: () => ctx.read<QuizCubit>().submitAnswer(i),
+                            )
+                            .animate()
+                            .fadeIn(
+                              delay: Duration(milliseconds: i * 80),
+                              duration: const Duration(milliseconds: 300),
+                            )
+                            .slideX(begin: 0.15);
+                      },
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 12),
+                  // Player status chips
+                  BlocBuilder<RoomCubit, RoomState>(
+                    builder: (ctx, roomState) => Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: roomState.players
+                          .map(
+                            (p) => PlayerChip(
+                              player: p,
+                              hasAnswered:
+                                  q.playerAnswers.containsKey(p.id) &&
+                                  q.playerAnswers[p.id] != null,
+                            ),
+                          )
+                          .toList(),
+                    ),
+                  ),
+                ],
               ),
             ),
-            const SizedBox(height: 16),
-
-            // Answer choices
-            ...List.generate(state.question.choices.length, (i) {
-              final answerState = _answerState(i, state.myAnswer);
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 10),
-                child: AnswerButton(
-                  text: state.question.choices[i],
-                  state: answerState,
-                  onTap: state.myAnswer == null
-                      ? () => context.read<QuizCubit>().submitAnswer(i)
-                      : null,
-                ),
-              );
-            }),
-            const SizedBox(height: 12),
-
-            // Player answer status chips
-            BlocBuilder<RoomCubit, RoomState>(
-              builder: (ctx, roomState) {
-                if (roomState.players.isEmpty) return const SizedBox();
-                return Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: roomState.players.map((p) {
-                    final hasAnswered =
-                        state.playerAnswers.containsKey(p.id) &&
-                            state.playerAnswers[p.id] != null;
-                    return PlayerChip(
-                      player: p,
-                      hasAnswered: hasAnswered,
-                      isMe: p.id == myPlayerId,
-                    );
-                  }).toList(),
-                );
-              },
-            ),
-          ],
-        ),
-      ),
+          ),
+        );
+      },
     );
-  }
-
-  AnswerButtonState _answerState(int index, int? myAnswer) {
-    if (myAnswer == null) return AnswerButtonState.idle;
-    if (myAnswer == index) return AnswerButtonState.selected;
-    return AnswerButtonState.idle;
   }
 }
