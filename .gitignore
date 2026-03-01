@@ -1,0 +1,25 @@
+# ─── macOS ────────────────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# ─── Node.js / Backend ────────────────────────────────────────────────────────
+backend/node_modules/
+backend/dist/
+backend/.env
+# Keep .env.example committed
+
+# ─── Flutter / Frontend ───────────────────────────────────────────────────────
+frontend/.dart_tool/
+frontend/.flutter-plugins
+frontend/.flutter-plugins-dependencies
+frontend/.pub-cache/
+frontend/build/
+frontend/linux/
+frontend/macos/
+frontend/windows/
+# Keep web/ and lib/ and pubspec committed
+
+# ─── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+npm-debug.log*
