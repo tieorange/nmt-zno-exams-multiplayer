@@ -23,6 +23,7 @@ export async function broadcastToRoom(
   event: string,
   payload: unknown,
 ): Promise<void> {
+  logger.info(`[Supabase] Broadcasting | roomCode=${roomCode} event=${event}`);
   const res = await fetch(`${url}/realtime/v1/api/broadcast`, {
     method: 'POST',
     headers: {
@@ -35,6 +36,8 @@ export async function broadcastToRoom(
     }),
   });
   if (!res.ok) {
-    throw new Error(`[Supabase] broadcastToRoom failed | event=${event} status=${res.status} body=${await res.text()}`);
+    const errBody = await res.text();
+    throw new Error(`[Supabase] broadcastToRoom failed | event=${event} status=${res.status} body=${errBody}`);
   }
+  logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
 }

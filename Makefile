@@ -1,4 +1,4 @@
-.PHONY: help supabase-start supabase-stop backend frontend all seed install lint lint-backend lint-frontend
+.PHONY: help supabase-start supabase-stop supabase-push backend frontend all seed install lint lint-backend lint-frontend kill-port-3000
 
 # --- Auto-read Supabase credentials from backend/.env ---
 SUPABASE_URL      := $(shell grep -E '^SUPABASE_URL='      backend/.env | cut -d= -f2-)
@@ -16,6 +16,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make supabase-start   - Start local Supabase Docker containers"
 	@echo "  make supabase-stop    - Stop local Supabase"
+	@echo "  make supabase-push    - Push database migrations"
 	@echo "  make backend          - Run Node.js backend (dev mode)"
 	@echo "  make frontend         - Run Flutter Web frontend (auto-injects Supabase env)"
 	@echo "  make all              - Run Supabase, Backend, and Frontend together"
@@ -32,8 +33,20 @@ supabase-stop:
 	@echo "Stopping local Supabase..."
 	npx supabase stop
 
+supabase-push:
+	@echo "Pushing database migrations..."
+	npx supabase db push
+
+# --- Helper Functions ---
+# Kill any process using port 3000 to avoid EADDRINUSE
+kill-port-3000:
+	@if lsof -ti:3000 > /dev/null 2>&1; then \
+		echo "Killing existing process on port 3000..."; \
+		lsof -ti:3000 | xargs kill -9 2>/dev/null || true; \
+	fi
+
 # --- Application Services ---
-backend: supabase-start
+backend: supabase-start kill-port-3000
 	@echo "Starting backend server..."
 	cd backend && npm run dev
 
@@ -44,7 +57,7 @@ frontend:
 	cd frontend && flutter run -d chrome $(FLUTTER_DEFINES)
 
 # --- Combined & Helper Commands ---
-all: supabase-start
+all: supabase-start kill-port-3000
 	@echo "Starting everything! 🚀"
 	@echo "Starting Backend and Frontend in parallel..."
 	@# Run backend in the background, run frontend in the foreground

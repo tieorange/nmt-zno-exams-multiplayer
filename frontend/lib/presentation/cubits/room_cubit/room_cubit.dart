@@ -36,6 +36,21 @@ class RoomCubit extends Cubit<RoomState> {
       myIsCreator = result['isCreator'] as bool? ?? false;
       logger.i('[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator');
 
+      // Immediately update local state with our player info to avoid race conditions
+      // where the realtime broadcast hasn't arrived yet
+      final myPlayer = PlayerModel(
+        id: myPlayerId!,
+        name: myName!,
+        color: result['color'] as String? ?? '#4ECDC4',
+        score: 0,
+        isCreator: myIsCreator,
+      );
+      emit(state.copyWith(
+        code: roomCode.toUpperCase(),
+        players: [myPlayer],
+        status: RoomStatus.waiting,
+      ));
+
       // Start heartbeat — backend disconnects players after 60s of silence
       _startHeartbeat(roomCode.toUpperCase());
     } catch (e) {

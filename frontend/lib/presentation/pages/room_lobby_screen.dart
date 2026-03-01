@@ -187,7 +187,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         return SizedBox(
                           width: double.infinity,
                           child: FilledButton(
-                            onPressed: state.players.isNotEmpty ? () => cubit.startGame() : null,
+                            onPressed: () => cubit.startGame(),
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFF4ECDC4),
                               foregroundColor: Colors.black,
