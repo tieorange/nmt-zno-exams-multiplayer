@@ -73,8 +73,10 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 | `cors` | `^2.8` | CORS middleware |
 | `helmet` | `^7.1` | Security headers |
 | `dotenv` | `^16.3` | Environment variables |
+| `uuid` | `^9.0` | Generate UUIDs for player IDs |
 | `tsx` (dev) | `^4.6` | Run TypeScript directly (replaces ts-node) |
 | `typescript` (dev) | `^5.3` | TypeScript compiler |
+| `@types/uuid` (dev) | `^9.0` | TypeScript types for uuid |
 
 > Use `tsx` for all scripts and dev server — it's faster than `ts-node`.
 
@@ -93,6 +95,7 @@ Ukrainian students (16 yo) need to pass the **NMT (НМТ)** national exam. This
 | `logger` | `^2.0` | Structured logs with tag prefix |
 | `equatable` | `^2.0` | Value equality for Cubit states |
 | `url_launcher` | `^6.2` | Share link button |
+| `http` | `^1.2` | HTTP client for REST calls (POST /api/rooms from GameCubit) |
 
 ---
 
@@ -170,11 +173,14 @@ nmt-zno-exams-multiplayer/
 
 | Event | Direction | Payload |
 |---|---|---|
-| `room:join` | client → server | `{ roomCode, playerName? }` |
-| `room:state` | server → client | `{ players, subject, status }` |
-| `game:start` | server → all | `{ totalQuestions: 10 }` |
-| `question:new` | server → all | `ClientQuestion` (no correct index) |
+| `room:join` | client → server | `{ roomCode }` — name/color assigned server-side |
+| `room:joined` | server → joining client only | `{ playerId, name, color, isCreator }` — tells you your own identity |
+| `room:state` | server → all in room | `{ code, subject, status, maxPlayers, players }` |
+| `game:start` | client → server | `{}` — creator triggers game start |
+| `game:start` | server → all | `{ totalQuestions: 10 }` — game has begun |
+| `question:new` | server → all | `ClientQuestion` (no `correct_answer_index`) |
 | `player:answer` | client → server | `{ questionId, answerIndex }` |
+| `round:update` | server → all | `{ playerAnswers }` — partial results as players answer |
 | `round:reveal` | server → all | `{ correctIndex, playerAnswers, scores }` |
 | `game:end` | server → all | `{ scoreboard }` |
 | `player:disconnected` | server → all | `{ playerId }` |
@@ -226,16 +232,27 @@ nmt-zno-exams-multiplayer/
 {
   "code": "A9X",
   "subject": "history",
-  "status": "waiting" | "playing" | "finished",
+  "status": "waiting | playing | finished",
   "maxPlayers": 4,
   "players": [
-    { "id": "socket_id", "name": "Веселий Кит", "color": "#FF6B6B", "score": 0, "isCreator": true }
+    {
+      "id": "uuid-v4",
+      "socketId": "socket.io-connection-id",
+      "name": "Веселий Кит",
+      "color": "#FF6B6B",
+      "score": 0,
+      "isCreator": true,
+      "joinedAt": "...",
+      "lastSeen": "..."
+    }
   ],
-  "questions": ["id1", "id2", ...],
+  "questionIds": ["osy_history_42", "osy_history_7", "..."],
   "currentQuestionIndex": 0,
+  "roundStartedAt": "...",
   "createdAt": "..."
 }
 ```
+> Note: `players` array starts **empty** when room is created via REST. Players are added when they connect via `room:join` socket event.
 
 ---
 
@@ -266,7 +283,7 @@ nmt-zno-exams-multiplayer/
 - [ ] `RoomCubit` — lobby state (waiting/ready/gameStarted)
 - [ ] `QuizCubit` — in-game state (question, timer countdown, answers, reveal)
 - [ ] `GameCubit` — overall flow (create/join/results)
-- [ ] go_router setup: `/`, `/create`, `/room/:code`, `/room/:code/game`, `/room/:code/results`
+- [ ] go_router setup: `/`, `/create`, `/room/:code`, `/room/:code/game`, `/room/:code/reveal`, `/room/:code/results`
 - [ ] Home screen — "Створити кімнату" / "Приєднатися" buttons
 - [ ] Create room screen — subject picker + player count selector
 - [ ] Room lobby screen — large room code, share link, player list, "Почати гру"
