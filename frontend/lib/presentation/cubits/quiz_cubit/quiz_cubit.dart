@@ -163,6 +163,16 @@ class QuizCubit extends Cubit<QuizState> {
     );
   }
 
+  Future<void> nextQuestion() async {
+    if (_myPlayerId == null || _roomCode == null) return;
+    logger.i('[QuizCubit] nextQuestion | roomCode=$_roomCode');
+    try {
+      await apiService.nextQuestion(_roomCode!, _myPlayerId!);
+    } catch (e) {
+      logger.e('[QuizCubit] nextQuestion failed | err=$e');
+    }
+  }
+
   Future<void> submitAnswer(int answerIndex) async {
     final s = state;
     if (s is! QuizQuestion || _myPlayerId == null || _roomCode == null) return;

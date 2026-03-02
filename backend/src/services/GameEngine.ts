@@ -19,10 +19,12 @@ import { clearRoom } from './NameGenerator.js';
 import { logger } from '../config/logger.js';
 import { isPlayerOffline } from './PlayerManager.js';
 
-const QUESTION_COUNT = 10;
+const QUESTION_COUNT = 5;
 // Override with env var for testing (e.g. ROUND_TIMER_MS=10000 for 10s rounds)
 const ROUND_TIMER_MS = parseInt(process.env.ROUND_TIMER_MS ?? '') || 5 * 60 * 1000;
-const REVEAL_DELAY_MS = parseInt(process.env.REVEAL_DELAY_MS ?? '') || 3000;
+// Safety fallback: auto-advance to next question if creator doesn't press the button.
+// Override with env var for testing (e.g. PENDING_ROUND_TIMEOUT_MS=30000 for 30s).
+const PENDING_ROUND_TIMEOUT_MS = parseInt(process.env.PENDING_ROUND_TIMEOUT_MS ?? '') || 5 * 60 * 1000;
 const CORRECT_ANSWER_POINTS = 10;
 
 interface RoundState {
@@ -32,9 +34,20 @@ interface RoundState {
   questionIndex: number;
 }
 
+// Holds state between revealRound and the creator pressing "next question".
+// Cleared when creator advances, or by the fallback safety timer.
+interface PendingNextRound {
+  nextIndex: number;
+  questions: Question[];
+  fallbackTimer: ReturnType<typeof setTimeout>;
+}
+
 // In-memory: roomCode → round state
 // This state lives in Node.js — intentional. Keeps game logic server-authoritative.
 const roundState = new Map<string, RoundState>();
+
+// In-memory: roomCode → pending next-round state (between reveal and creator pressing next)
+const pendingNextRound = new Map<string, PendingNextRound>();
 
 // Track cleanup timeouts so we can cancel if a room gets reused
 const cleanupTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
@@ -102,6 +115,13 @@ export async function restartGame(roomCode: string): Promise<void> {
     if (existingCleanup) {
       clearTimeout(existingCleanup);
       cleanupTimeouts.delete(roomCode);
+    }
+
+    // Cancel any pending "waiting for next question" state from the previous game
+    const existingPending = pendingNextRound.get(roomCode);
+    if (existingPending) {
+      clearTimeout(existingPending.fallbackTimer);
+      pendingNextRound.delete(roomCode);
     }
 
     await updateRoom(roomCode, {
@@ -297,15 +317,44 @@ async function revealRound(
     scoreDeltas,
   });
 
-  setTimeout(() => {
-    void (async () => {
-      if (questionIndex + 1 >= questions.length) {
-        await endGame(roomCode);
-      } else {
-        await startRound(roomCode, questionIndex + 1, questions);
-      }
-    })();
-  }, REVEAL_DELAY_MS);
+  // Store pending state so creator can manually advance with nextQuestion().
+  // Safety fallback fires automatically in case creator disconnects.
+  const fallbackTimer = setTimeout(
+    () => void advanceToNextRound(roomCode),
+    PENDING_ROUND_TIMEOUT_MS,
+  );
+  pendingNextRound.set(roomCode, { nextIndex: questionIndex + 1, questions, fallbackTimer });
+}
+
+async function advanceToNextRound(roomCode: string): Promise<void> {
+  const pending = pendingNextRound.get(roomCode);
+  if (!pending) return; // Already advanced (creator pressed button or fallback already ran)
+  pendingNextRound.delete(roomCode);
+  clearTimeout(pending.fallbackTimer);
+
+  if (pending.nextIndex >= pending.questions.length) {
+    await endGame(roomCode);
+  } else {
+    await startRound(roomCode, pending.nextIndex, pending.questions);
+  }
+}
+
+export async function nextQuestion(roomCode: string, playerId: string): Promise<void> {
+  const players = await getPlayers(roomCode);
+  const player = players.find((p) => p.id === playerId);
+  if (!player?.is_creator) {
+    throw new Error('Тільки творець може перейти до наступного питання');
+  }
+
+  const pending = pendingNextRound.get(roomCode);
+  if (!pending) {
+    throw new Error('Немає очікуваного наступного питання');
+  }
+
+  logger.info(
+    `[GameEngine] Creator advancing to next | roomCode=${roomCode} nextIndex=${pending.nextIndex}`,
+  );
+  await advanceToNextRound(roomCode);
 }
 
 async function endGame(roomCode: string): Promise<void> {

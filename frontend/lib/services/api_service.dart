@@ -113,4 +113,16 @@ class ApiService {
       throw Exception('restartGame failed: ${res.body}');
     }
   }
+
+  Future<void> nextQuestion(String roomCode, String playerId) async {
+    logger.i('[ApiService] POST /api/rooms/$roomCode/next-question | playerId=$playerId');
+    final res = await http.post(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}/next-question'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'playerId': playerId}),
+    );
+    if (res.statusCode != 200) {
+      throw Exception('nextQuestion failed: ${res.body}');
+    }
+  }
 }

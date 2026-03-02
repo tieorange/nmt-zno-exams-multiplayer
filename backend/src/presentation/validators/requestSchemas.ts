@@ -22,6 +22,10 @@ export const RestartGameSchema = z.object({
   playerId: z.string().uuid(),
 });
 
+export const NextQuestionSchema = z.object({
+  playerId: z.string().uuid(),
+});
+
 export const StartGameSchema = z.object({
   playerId: z.string().uuid(),
 });

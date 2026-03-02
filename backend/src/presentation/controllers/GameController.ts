@@ -5,8 +5,9 @@ import {
   startGame as engineStartGame,
   submitAnswer as engineSubmitAnswer,
   restartGame as engineRestartGame,
+  nextQuestion as engineNextQuestion,
 } from '../../services/GameEngine.js';
-import { StartGameSchema, SubmitAnswerSchema, RestartGameSchema } from '../validators/requestSchemas.js';
+import { StartGameSchema, SubmitAnswerSchema, RestartGameSchema, NextQuestionSchema } from '../validators/requestSchemas.js';
 import { logger } from '../../config/logger.js';
 
 export async function startGame(req: Request, res: Response) {
@@ -101,4 +102,21 @@ export async function restartGame(req: Request, res: Response) {
   logger.info(`[GameController] game:restart | roomCode=${code} playerId=${parsed.data.playerId}`);
   await engineRestartGame(code);
   res.json({ ok: true });
+}
+
+export async function nextQuestion(req: Request, res: Response) {
+  const code = String(req.params.code).toUpperCase();
+  const parsed = NextQuestionSchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.flatten() });
+    return;
+  }
+
+  try {
+    await engineNextQuestion(code, parsed.data.playerId);
+    res.json({ ok: true });
+  } catch (err: any) {
+    logger.warn(`[GameController] next-question failed | roomCode=${code} err=${err.message}`);
+    res.status(400).json({ error: err.message });
+  }
 }
