@@ -24,16 +24,13 @@ export async function broadcastToRoom(
   payload: unknown,
 ): Promise<void> {
   logger.info(`[Supabase] Broadcasting | roomCode=${roomCode} event=${event}`);
-  
+
   // Use Supabase client's channel to broadcast - more reliable than REST API
   const channel = supabase.channel(`room:${roomCode}`);
-  
+
   try {
-    await channel.send({
-      type: 'broadcast',
-      event: event,
-      payload: payload,
-    });
+    // The realtime client warns to use httpSend for REST delivery when not subscribed
+    await (channel as any).httpSend(event, payload);
     logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
   } catch (err) {
     logger.error(`[Supabase] Broadcast failed | roomCode=${roomCode} event=${event} error=${err}`);

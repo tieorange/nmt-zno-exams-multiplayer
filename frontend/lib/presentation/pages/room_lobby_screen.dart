@@ -57,7 +57,10 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         const Expanded(
                           child: Text(
                             'Кімната очікування',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                            style: TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
                             textAlign: TextAlign.center,
                           ),
                         ),
@@ -67,68 +70,94 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                     const SizedBox(height: 32),
                     // Room code
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 20),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF4ECDC4).withValues(alpha: 0.1),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(
-                          color: const Color(0xFF4ECDC4).withValues(alpha: 0.4),
-                          width: 1.5,
-                        ),
-                      ),
-                      child: Column(
-                        children: [
-                          Text(
-                            'Код кімнати',
-                            style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 32,
+                            vertical: 20,
                           ),
-                          const SizedBox(height: 4),
-                          Row(
-                            mainAxisSize: MainAxisSize.min,
+                          decoration: BoxDecoration(
+                            color: const Color(
+                              0xFF4ECDC4,
+                            ).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(
+                              color: const Color(
+                                0xFF4ECDC4,
+                              ).withValues(alpha: 0.4),
+                              width: 1.5,
+                            ),
+                          ),
+                          child: Column(
                             children: [
                               Text(
-                                widget.roomCode,
-                                style: const TextStyle(
-                                  fontSize: 48,
-                                  fontWeight: FontWeight.w900,
-                                  color: Color(0xFF4ECDC4),
-                                  letterSpacing: 12,
+                                'Код кімнати',
+                                style: TextStyle(
+                                  color: Colors.white.withValues(alpha: 0.6),
+                                  fontSize: 14,
                                 ),
                               ),
-                              const SizedBox(width: 4),
-                              IconButton(
-                                onPressed: () {
-                                  Clipboard.setData(ClipboardData(text: widget.roomCode));
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(
-                                      content: Text('Код скопійовано!'),
-                                      duration: Duration(seconds: 1),
+                              const SizedBox(height: 4),
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    widget.roomCode,
+                                    style: const TextStyle(
+                                      fontSize: 48,
+                                      fontWeight: FontWeight.w900,
+                                      color: Color(0xFF4ECDC4),
+                                      letterSpacing: 12,
                                     ),
-                                  );
-                                },
-                                icon: const Icon(Icons.copy, color: Color(0xFF4ECDC4)),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  IconButton(
+                                    onPressed: () {
+                                      Clipboard.setData(
+                                        ClipboardData(text: widget.roomCode),
+                                      );
+                                      ScaffoldMessenger.of(ctx).showSnackBar(
+                                        const SnackBar(
+                                          content: Text('Код скопійовано!'),
+                                          duration: Duration(seconds: 1),
+                                        ),
+                                      );
+                                    },
+                                    icon: const Icon(
+                                      Icons.copy,
+                                      color: Color(0xFF4ECDC4),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
-                        ],
-                      ),
-                    ).animate().fadeIn(duration: 500.ms).scale(begin: const Offset(0.9, 0.9)),
+                        )
+                        .animate()
+                        .fadeIn(duration: 500.ms)
+                        .scale(begin: const Offset(0.9, 0.9)),
                     const SizedBox(height: 32),
                     // Player count
                     Row(
                       children: [
                         Text(
                           'Гравці (${state.players.length}/${state.maxPlayers})',
-                          style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         const Spacer(),
                         if (state.status == RoomStatus.waiting)
                           Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 4,
+                            ),
                             decoration: BoxDecoration(
                               color: Colors.orange.withValues(alpha: 0.2),
                               borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.orange.withValues(alpha: 0.5)),
+                              border: Border.all(
+                                color: Colors.orange.withValues(alpha: 0.5),
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -144,7 +173,10 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                 SizedBox(width: 6),
                                 Text(
                                   'Очікування',
-                                  style: TextStyle(fontSize: 12, color: Colors.orange),
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.orange,
+                                  ),
                                 ),
                               ],
                             ),
@@ -198,7 +230,10 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                             ),
                             child: const Text(
                               'Почати гру 🚀',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                           ),
                         );

@@ -29,7 +29,9 @@ class ApiService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'subject': subject, 'maxPlayers': maxPlayers}),
     );
-    if (res.statusCode != 201) throw Exception('createRoom failed: ${res.body}');
+    if (res.statusCode != 201) {
+      throw Exception('createRoom failed: ${res.body}');
+    }
     return jsonDecode(res.body) as Map<String, dynamic>;
     // Returns: { code: 'A9X' }
   }
@@ -74,7 +76,9 @@ class ApiService {
         'answerIndex': answerIndex,
       }),
     );
-    if (res.statusCode != 200) throw Exception('submitAnswer failed: ${res.body}');
+    if (res.statusCode != 200) {
+      throw Exception('submitAnswer failed: ${res.body}');
+    }
   }
 
   Future<void> heartbeat(String roomCode, String playerId) async {
@@ -91,7 +95,9 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getSubjects() async {
     final res = await http.get(Uri.parse('$baseUrl/api/subjects'));
-    if (res.statusCode != 200) throw Exception('getSubjects failed: ${res.body}');
+    if (res.statusCode != 200) {
+      throw Exception('getSubjects failed: ${res.body}');
+    }
     final data = jsonDecode(res.body) as Map<String, dynamic>;
     return List<Map<String, dynamic>>.from(data['subjects'] as List);
   }
@@ -103,6 +109,8 @@ class ApiService {
       headers: {'Content-Type': 'application/json'},
       body: jsonEncode({'playerId': playerId}),
     );
-    if (res.statusCode != 200) throw Exception('restartGame failed: ${res.body}');
+    if (res.statusCode != 200) {
+      throw Exception('restartGame failed: ${res.body}');
+    }
   }
 }

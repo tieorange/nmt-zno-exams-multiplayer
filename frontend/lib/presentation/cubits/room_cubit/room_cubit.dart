@@ -45,11 +45,22 @@ class RoomCubit extends Cubit<RoomState> {
         score: 0,
         isCreator: myIsCreator,
       );
-      emit(state.copyWith(
-        code: roomCode.toUpperCase(),
-        players: [myPlayer],
-        status: RoomStatus.waiting,
-      ));
+
+      final currentPlayers = List<PlayerModel>.from(state.players);
+      final index = currentPlayers.indexWhere((p) => p.id == myPlayerId);
+      if (index >= 0) {
+        currentPlayers[index] = myPlayer;
+      } else {
+        currentPlayers.add(myPlayer);
+      }
+
+      emit(
+        state.copyWith(
+          code: roomCode.toUpperCase(),
+          players: currentPlayers,
+          status: RoomStatus.waiting,
+        ),
+      );
 
       // Start heartbeat — backend disconnects players after 60s of silence
       _startHeartbeat(roomCode.toUpperCase());
@@ -94,6 +105,24 @@ class RoomCubit extends Cubit<RoomState> {
         if (playerId != null) {
           emit(state.copyWith(players: state.players.where((p) => p.id != playerId).toList()));
         }
+        break;
+      case RealtimeEventType.roundReveal:
+        // Update all player scores from the event
+        final scoreMap = event.data['scores'] as Map<String, dynamic>? ?? {};
+        final updatedPlayers = state.players.map((p) {
+          if (scoreMap.containsKey(p.id)) {
+            return PlayerModel(
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              score: scoreMap[p.id] as int,
+              isCreator: p.isCreator,
+            );
+          }
+          return p;
+        }).toList();
+
+        emit(state.copyWith(players: updatedPlayers));
         break;
       default:
         break;

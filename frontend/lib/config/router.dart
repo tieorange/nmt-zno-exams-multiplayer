@@ -13,19 +13,23 @@ final goRouter = GoRouter(
     GoRoute(path: '/create', builder: (_, __) => const CreateRoomScreen()),
     GoRoute(
       path: '/room/:roomCode',
-      builder: (_, state) => RoomLobbyScreen(roomCode: state.pathParameters['roomCode']!),
+      builder: (_, state) =>
+          RoomLobbyScreen(roomCode: state.pathParameters['roomCode']!),
       routes: [
         GoRoute(
           path: 'game',
-          builder: (_, state) => GameplayScreen(roomCode: state.pathParameters['roomCode']!),
+          builder: (_, state) =>
+              GameplayScreen(roomCode: state.pathParameters['roomCode']!),
         ),
         GoRoute(
           path: 'reveal',
-          builder: (_, state) => RoundRevealScreen(roomCode: state.pathParameters['roomCode']!),
+          builder: (_, state) =>
+              RoundRevealScreen(roomCode: state.pathParameters['roomCode']!),
         ),
         GoRoute(
           path: 'results',
-          builder: (_, state) => ResultsScreen(roomCode: state.pathParameters['roomCode']!),
+          builder: (_, state) =>
+              ResultsScreen(roomCode: state.pathParameters['roomCode']!),
         ),
       ],
     ),

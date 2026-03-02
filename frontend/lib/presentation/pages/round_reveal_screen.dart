@@ -35,7 +35,9 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
       builder: (ctx, state) {
         final rev = state is QuizReveal ? state : null;
         if (rev == null) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         final isCorrect = rev.myAnswer == rev.correctIndex;
 
@@ -51,19 +53,27 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          color: isCorrect ? Colors.green.shade900 : Colors.red.shade900,
+                          color: isCorrect
+                              ? Colors.green.shade900
+                              : Colors.red.shade900,
                           borderRadius: BorderRadius.circular(20),
                         ),
                         child: Column(
                           children: [
                             Text(
                               isCorrect ? '✅ Правильно!' : '❌ Помилка',
-                              style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
+                              style: const TextStyle(
+                                fontSize: 28,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                             if (isCorrect)
-                              const Text(
-                                '+10 балів',
-                                style: TextStyle(fontSize: 18, color: Colors.greenAccent),
+                              Text(
+                                '+${rev.myScoreGained ?? 0} балів',
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  color: Colors.greenAccent,
+                                ),
                               ),
                           ],
                         ),
@@ -75,7 +85,10 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                   // Question recap
                   Text(
                     rev.question.text,
-                    style: TextStyle(fontSize: 16, color: Colors.white.withValues(alpha: 0.7)),
+                    style: TextStyle(
+                      fontSize: 16,
+                      color: Colors.white.withValues(alpha: 0.7),
+                    ),
                   ),
                   const SizedBox(height: 16),
                   // Answer buttons with reveal states
@@ -83,20 +96,25 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                     AnswerState answerState;
                     if (i == rev.correctIndex) {
                       answerState = AnswerState.correct;
-                    } else if (i == rev.myAnswer && rev.myAnswer != rev.correctIndex) {
+                    } else if (i == rev.myAnswer &&
+                        rev.myAnswer != rev.correctIndex) {
                       answerState = AnswerState.wrong;
                     } else {
                       answerState = AnswerState.idle;
                     }
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
-                      child: AnswerButton(text: rev.question.choices[i], state: answerState)
-                          .animate()
-                          .fadeIn(
-                            delay: Duration(milliseconds: i * 100),
-                            duration: const Duration(milliseconds: 300),
-                          )
-                          .slideX(begin: 0.1),
+                      child:
+                          AnswerButton(
+                                text: rev.question.choices[i],
+                                state: answerState,
+                              )
+                              .animate()
+                              .fadeIn(
+                                delay: Duration(milliseconds: i * 100),
+                                duration: const Duration(milliseconds: 300),
+                              )
+                              .slideX(begin: 0.1),
                     );
                   }),
                   const Spacer(),
@@ -107,7 +125,10 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                       children: [
                         const Text(
                           'Рахунок:',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                          style: TextStyle(
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
                         ),
                         const SizedBox(height: 8),
                         ...roomState.players.map((p) {
@@ -119,11 +140,16 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                                 CircleAvatar(
                                   radius: 12,
                                   backgroundColor: Color(
-                                    int.parse(p.color.replaceFirst('#', '0xFF')),
+                                    int.parse(
+                                      p.color.replaceFirst('#', '0xFF'),
+                                    ),
                                   ),
                                   child: Text(
                                     p.name[0],
-                                    style: const TextStyle(fontSize: 10, color: Colors.white),
+                                    style: const TextStyle(
+                                      fontSize: 10,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
                                 const SizedBox(width: 8),
@@ -147,7 +173,10 @@ class _RoundRevealScreenState extends State<RoundRevealScreen> {
                   Center(
                     child: Text(
                       'Наступне питання через 3 секунди…',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 13),
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.4),
+                        fontSize: 13,
+                      ),
                     ),
                   ),
                 ],

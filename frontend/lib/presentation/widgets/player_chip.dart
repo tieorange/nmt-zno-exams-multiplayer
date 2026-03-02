@@ -28,7 +28,10 @@ class PlayerChip extends StatelessWidget {
           CircleAvatar(
             radius: 14,
             backgroundColor: _color,
-            child: Text(player.name[0], style: const TextStyle(fontSize: 12, color: Colors.white)),
+            child: Text(
+              player.name[0],
+              style: const TextStyle(fontSize: 12, color: Colors.white),
+            ),
           ),
           const SizedBox(width: 6),
           Text(player.name, style: const TextStyle(fontSize: 13)),

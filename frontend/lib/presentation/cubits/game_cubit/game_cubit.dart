@@ -7,7 +7,8 @@ class GameCubit extends Cubit<GameState> {
   final ApiService apiService;
   final Logger logger;
 
-  GameCubit({required this.apiService, required this.logger}) : super(const GameInitial());
+  GameCubit({required this.apiService, required this.logger})
+    : super(const GameInitial());
 
   Future<void> createRoom(String subject, int maxPlayers) async {
     emit(const GameCreating());

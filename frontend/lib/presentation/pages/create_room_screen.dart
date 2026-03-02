@@ -6,7 +6,11 @@ import '../cubits/game_cubit/game_cubit.dart';
 import '../cubits/game_cubit/game_state.dart';
 
 const _subjects = [
-  {'key': 'ukrainian_language', 'label': 'Українська мова та літ.', 'icon': '🇺🇦'},
+  {
+    'key': 'ukrainian_language',
+    'label': 'Українська мова та літ.',
+    'icon': '🇺🇦',
+  },
   {'key': 'history', 'label': 'Історія України', 'icon': '📜'},
   {'key': 'geography', 'label': 'Географія', 'icon': '🗺️'},
   {'key': 'math', 'label': 'Математика', 'icon': '📐'},
@@ -29,9 +33,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
         if (state is GameCreated) {
           ctx.go('/room/${state.roomCode}');
         } else if (state is GameError) {
-          ScaffoldMessenger.of(
-            ctx,
-          ).showSnackBar(SnackBar(content: Text(state.message), backgroundColor: Colors.red));
+          ScaffoldMessenger.of(ctx).showSnackBar(
+            SnackBar(content: Text(state.message), backgroundColor: Colors.red),
+          );
         }
       },
       child: Scaffold(
@@ -60,31 +64,46 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       AnimatedContainer(
                             duration: const Duration(milliseconds: 200),
                             margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 16,
+                              vertical: 14,
+                            ),
                             decoration: BoxDecoration(
                               color: selected
-                                  ? const Color(0xFF4ECDC4).withValues(alpha: 0.2)
+                                  ? const Color(
+                                      0xFF4ECDC4,
+                                    ).withValues(alpha: 0.2)
                                   : const Color(0xFF161B22),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: selected ? const Color(0xFF4ECDC4) : Colors.white12,
+                                color: selected
+                                    ? const Color(0xFF4ECDC4)
+                                    : Colors.white12,
                                 width: selected ? 2 : 1,
                               ),
                             ),
                             child: Row(
                               children: [
-                                Text(s['icon']!, style: const TextStyle(fontSize: 24)),
+                                Text(
+                                  s['icon']!,
+                                  style: const TextStyle(fontSize: 24),
+                                ),
                                 const SizedBox(width: 12),
                                 Text(
                                   s['label']!,
                                   style: TextStyle(
                                     fontSize: 16,
-                                    color: selected ? const Color(0xFF4ECDC4) : Colors.white,
+                                    color: selected
+                                        ? const Color(0xFF4ECDC4)
+                                        : Colors.white,
                                   ),
                                 ),
                                 if (selected) ...[
                                   const Spacer(),
-                                  const Icon(Icons.check_circle, color: Color(0xFF4ECDC4)),
+                                  const Icon(
+                                    Icons.check_circle,
+                                    color: Color(0xFF4ECDC4),
+                                  ),
                                 ],
                               ],
                             ),
@@ -120,7 +139,9 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                               : const Color(0xFF161B22),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
-                            color: sel ? const Color(0xFF4ECDC4) : Colors.white12,
+                            color: sel
+                                ? const Color(0xFF4ECDC4)
+                                : Colors.white12,
                             width: sel ? 2 : 1,
                           ),
                         ),
@@ -148,23 +169,34 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                       onPressed: _selectedSubject == null || isLoading
                           ? null
                           : () {
-                              ctx.read<GameCubit>().createRoom(_selectedSubject!, _maxPlayers);
+                              ctx.read<GameCubit>().createRoom(
+                                _selectedSubject!,
+                                _maxPlayers,
+                              );
                             },
                       style: FilledButton.styleFrom(
                         backgroundColor: const Color(0xFF4ECDC4),
                         foregroundColor: Colors.black,
                         padding: const EdgeInsets.symmetric(vertical: 18),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(16),
+                        ),
                       ),
                       child: isLoading
                           ? const SizedBox(
                               height: 20,
                               width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.black),
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: Colors.black,
+                              ),
                             )
                           : const Text(
                               'Створити кімнату',
-                              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                              style: TextStyle(
+                                fontSize: 18,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
                     ),
                   );

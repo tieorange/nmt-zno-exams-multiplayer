@@ -68,7 +68,9 @@ class NmtQuizApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0D1117),
         cardTheme: CardThemeData(
           color: const Color(0xFF161B22),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
           elevation: 0,
         ),
       ),

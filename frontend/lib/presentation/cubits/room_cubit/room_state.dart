@@ -42,5 +42,12 @@ class RoomState extends Equatable {
   );
 
   @override
-  List<Object?> get props => [code, subject, status, maxPlayers, players, errorMessage];
+  List<Object?> get props => [
+    code,
+    subject,
+    status,
+    maxPlayers,
+    players,
+    errorMessage,
+  ];
 }

@@ -27,7 +27,9 @@ class GameplayScreen extends StatelessWidget {
       builder: (ctx, state) {
         final q = state is QuizQuestion ? state : null;
         if (q == null) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
         return Scaffold(
           body: SafeArea(
@@ -41,7 +43,10 @@ class GameplayScreen extends StatelessWidget {
                     children: [
                       Text(
                         'Питання ${q.questionIndex}/${q.totalQuestions}',
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
+                        style: TextStyle(
+                          color: Colors.white.withValues(alpha: 0.6),
+                          fontSize: 14,
+                        ),
                       ),
                       const Spacer(),
                     ],
@@ -49,71 +54,88 @@ class GameplayScreen extends StatelessWidget {
                   const SizedBox(height: 8),
                   TimerBar(remaining: q.timeRemaining, total: q.totalTime),
                   const SizedBox(height: 20),
-                  // Question card
-                  Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(20),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF161B22),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white12),
-                        ),
-                        child: Text(
-                          q.question.text,
-                          style: const TextStyle(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w600,
-                            height: 1.5,
-                          ),
-                        ),
-                      )
-                      .animate()
-                      .fadeIn(duration: const Duration(milliseconds: 400))
-                      .slideY(begin: -0.1),
-                  const SizedBox(height: 20),
-                  // Answer buttons
+                  // Scrollable content area
                   Expanded(
-                    child: ListView.separated(
-                      itemCount: q.question.choices.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 10),
-                      itemBuilder: (ctx, i) {
-                        AnswerState answerState = AnswerState.idle;
-                        if (q.myAnswer != null) {
-                          answerState = q.myAnswer == i ? AnswerState.selected : AnswerState.idle;
-                        }
-                        return AnswerButton(
-                              text: q.question.choices[i],
-                              state: answerState,
-                              // Bug 11 fix: disable all buttons once player has answered
-                              onTap: q.myAnswer == null
-                                  ? () => ctx.read<QuizCubit>().submitAnswer(i)
-                                  : null,
-                            )
-                            .animate()
-                            .fadeIn(
-                              delay: Duration(milliseconds: i * 80),
-                              duration: const Duration(milliseconds: 300),
-                            )
-                            .slideX(begin: 0.15);
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  // Player status chips
-                  BlocBuilder<RoomCubit, RoomState>(
-                    builder: (ctx, roomState) => Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: roomState.players
-                          .map(
-                            (p) => PlayerChip(
-                              player: p,
-                              hasAnswered:
-                                  q.playerAnswers.containsKey(p.id) &&
-                                  q.playerAnswers[p.id] != null,
+                    child: SingleChildScrollView(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          // Question card
+                          Container(
+                                width: double.infinity,
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF161B22),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: Colors.white12),
+                                ),
+                                child: Text(
+                                  q.question.text,
+                                  style: const TextStyle(
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w600,
+                                    height: 1.5,
+                                  ),
+                                ),
+                              )
+                              .animate()
+                              .fadeIn(
+                                duration: const Duration(milliseconds: 400),
+                              )
+                              .slideY(begin: -0.1),
+                          const SizedBox(height: 20),
+                          // Answer buttons
+                          ListView.separated(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: q.question.choices.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 10),
+                            itemBuilder: (ctx, i) {
+                              AnswerState answerState = AnswerState.idle;
+                              if (q.myAnswer != null) {
+                                answerState = q.myAnswer == i
+                                    ? AnswerState.selected
+                                    : AnswerState.idle;
+                              }
+                              return AnswerButton(
+                                    text: q.question.choices[i],
+                                    state: answerState,
+                                    // Bug 11 fix: disable all buttons once player has answered
+                                    onTap: q.myAnswer == null
+                                        ? () => ctx
+                                              .read<QuizCubit>()
+                                              .submitAnswer(i)
+                                        : null,
+                                  )
+                                  .animate()
+                                  .fadeIn(
+                                    delay: Duration(milliseconds: i * 80),
+                                    duration: const Duration(milliseconds: 300),
+                                  )
+                                  .slideX(begin: 0.15);
+                            },
+                          ),
+                          const SizedBox(height: 12),
+                          // Player status chips
+                          BlocBuilder<RoomCubit, RoomState>(
+                            builder: (ctx, roomState) => Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: roomState.players
+                                  .map(
+                                    (p) => PlayerChip(
+                                      player: p,
+                                      hasAnswered:
+                                          q.playerAnswers.containsKey(p.id) &&
+                                          q.playerAnswers[p.id] != null,
+                                    ),
+                                  )
+                                  .toList(),
                             ),
-                          )
-                          .toList(),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 ],

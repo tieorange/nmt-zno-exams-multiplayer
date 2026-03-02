@@ -245,11 +245,19 @@ async function revealRound(
   const scoreUpdates: Promise<void>[] = [];
   const answerSaves: Promise<void>[] = [];
 
+  const scoreDeltas: Record<string, number> = {};
+
   for (const player of players) {
     const answer = state.answers.get(player.id);
+    let points = 0;
+
     if (answer === correctIndex) {
-      scoreUpdates.push(incrementPlayerScore(roomCode, player.id, CORRECT_ANSWER_POINTS));
+      points = CORRECT_ANSWER_POINTS;
+      scoreUpdates.push(incrementPlayerScore(roomCode, player.id, points));
     }
+
+    scoreDeltas[player.id] = points;
+
     // Persist answer to database (null answer means player didn't answer)
     if (answer !== null && answer !== undefined) {
       answerSaves.push(
@@ -286,6 +294,7 @@ async function revealRound(
     correctIndex,
     playerAnswers: Object.fromEntries(state.answers),
     scores: freshScores,
+    scoreDeltas,
   });
 
   setTimeout(() => {
