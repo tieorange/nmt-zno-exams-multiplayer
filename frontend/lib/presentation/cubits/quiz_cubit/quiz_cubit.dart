@@ -38,6 +38,7 @@ class QuizCubit extends Cubit<QuizState> {
         _questionIndex = 0;
         // Bug 8 fix: read timer duration from server so we stay in sync with ROUND_TIMER_MS
         _timerMs = event.data['timerMs'] as int? ?? (5 * 60 * 1000);
+        logger.i('[QuizCubit] game:start received | totalQuestions=$_totalQuestions timerMs=$_timerMs');
         break;
       case RealtimeEventType.questionNew:
         _handleNewQuestion(event.data);
@@ -99,6 +100,7 @@ class QuizCubit extends Cubit<QuizState> {
   void _handleRoundUpdate(Map<String, dynamic> data) {
     final raw = data['playerAnswers'] as Map<String, dynamic>? ?? {};
     final answers = raw.map((k, v) => MapEntry(k, v as int?));
+    logger.i('[QuizCubit] round:update received | answeredPlayers=${answers.length}');
     final s = state;
     if (s is QuizQuestion) emit(s.copyWith(playerAnswers: answers));
   }

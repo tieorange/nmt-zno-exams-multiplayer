@@ -36,11 +36,17 @@ class SupabaseService {
   }
 
   void subscribeToRoom(String roomCode) {
-    logger.i('[SupabaseService] subscribing to room:$roomCode');
+    logger.i('[SupabaseService] subscribing to room | roomCode=$roomCode');
     _channel = Supabase.instance.client
         .channel('room:$roomCode')
-        .onBroadcast(event: 'room:state', callback: (p) => _emit(RealtimeEventType.roomState, p))
-        .onBroadcast(event: 'game:start', callback: (p) => _emit(RealtimeEventType.gameStart, p))
+        .onBroadcast(event: 'room:state', callback: (p) {
+          logger.i('[SupabaseService] recv room:state | roomCode=$roomCode payloadKeys=${p.keys.toList()}');
+          _emit(RealtimeEventType.roomState, p);
+        })
+        .onBroadcast(event: 'game:start', callback: (p) {
+          logger.i('[SupabaseService] recv game:start | roomCode=$roomCode');
+          _emit(RealtimeEventType.gameStart, p);
+        })
         .onBroadcast(
           event: 'question:new',
           callback: (p) {
@@ -49,27 +55,40 @@ class SupabaseService {
                 '[SupabaseService] SECURITY VIOLATION: correct_answer_index in question:new!',
               );
             }
+            logger.i('[SupabaseService] recv question:new | roomCode=$roomCode questionId=${p['id']}');
             _emit(RealtimeEventType.questionNew, p);
           },
         )
         .onBroadcast(
           event: 'round:update',
-          callback: (p) => _emit(RealtimeEventType.roundUpdate, p),
+          callback: (p) {
+            logger.i('[SupabaseService] recv round:update | roomCode=$roomCode');
+            _emit(RealtimeEventType.roundUpdate, p);
+          },
         )
         .onBroadcast(
           event: 'round:reveal',
-          callback: (p) => _emit(RealtimeEventType.roundReveal, p),
+          callback: (p) {
+            logger.i('[SupabaseService] recv round:reveal | roomCode=$roomCode correctIndex=${p['correctIndex']}');
+            _emit(RealtimeEventType.roundReveal, p);
+          },
         )
-        .onBroadcast(event: 'game:end', callback: (p) => _emit(RealtimeEventType.gameEnd, p))
+        .onBroadcast(event: 'game:end', callback: (p) {
+          logger.i('[SupabaseService] recv game:end | roomCode=$roomCode');
+          _emit(RealtimeEventType.gameEnd, p);
+        })
         .onBroadcast(
           event: 'player:disconnected',
-          callback: (p) => _emit(RealtimeEventType.playerDisconnected, p),
+          callback: (p) {
+            logger.i('[SupabaseService] recv player:disconnected | roomCode=$roomCode playerId=${p['playerId']}');
+            _emit(RealtimeEventType.playerDisconnected, p);
+          },
         )
         .subscribe((status, err) {
           if (status == RealtimeSubscribeStatus.subscribed) {
-            logger.i('[SupabaseService] subscribed to room:$roomCode');
+            logger.i('[SupabaseService] subscribed successfully | roomCode=$roomCode');
           } else if (err != null) {
-            logger.e('[SupabaseService] ERROR subscription | err=$err');
+            logger.e('[SupabaseService] subscription error | roomCode=$roomCode err=$err');
           }
         });
   }

@@ -24,20 +24,19 @@ export async function broadcastToRoom(
   payload: unknown,
 ): Promise<void> {
   logger.info(`[Supabase] Broadcasting | roomCode=${roomCode} event=${event}`);
-  const res = await fetch(`${url}/realtime/v1/api/broadcast`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'Authorization': `Bearer ${key}`,
-      'apikey': key as string,
-    },
-    body: JSON.stringify({
-      messages: [{ topic: `room:${roomCode}`, event, payload }],
-    }),
-  });
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`[Supabase] broadcastToRoom failed | event=${event} status=${res.status} body=${errBody}`);
+  
+  // Use Supabase client's channel to broadcast - more reliable than REST API
+  const channel = supabase.channel(`room:${roomCode}`);
+  
+  try {
+    await channel.send({
+      type: 'broadcast',
+      event: event,
+      payload: payload,
+    });
+    logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
+  } catch (err) {
+    logger.error(`[Supabase] Broadcast failed | roomCode=${roomCode} event=${event} error=${err}`);
+    throw err;
   }
-  logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
 }

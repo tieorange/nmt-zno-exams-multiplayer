@@ -46,13 +46,17 @@ export async function createRoom(req: Request, res: Response) {
 
 export async function getRoomState(req: Request, res: Response) {
   const code = String(req.params.code).toUpperCase();
+  logger.info(`[RoomController] getRoomState | roomCode=${code}`);
+  
   const room = await dbGetRoom(code);
   if (!room) {
+    logger.warn(`[RoomController] getRoomState failed | roomCode=${code} reason=not_found`);
     res.status(404).json({ error: 'Room not found' });
     return;
   }
 
   const players = await getPlayers(code);
+  logger.info(`[RoomController] getRoomState | roomCode=${code} status=${room.status} players=${players.length}/${room.max_players}`);
 
   // Bug fix: If game is active, include the current question payload for reconnection sync
   const currentQuestion = room.status === 'playing' ? getCurrentClientQuestion(code) : null;

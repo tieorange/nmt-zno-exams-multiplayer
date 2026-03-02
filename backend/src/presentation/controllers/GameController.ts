@@ -19,22 +19,27 @@ export async function startGame(req: Request, res: Response) {
 
   const room = await getRoom(code);
   if (!room) {
+    logger.warn(`[GameController] game:start failed | roomCode=${code} reason=room_not_found`);
     res.status(404).json({ error: 'Кімнату не знайдено' });
     return;
   }
   if (room.status !== 'waiting') {
+    logger.warn(`[GameController] game:start failed | roomCode=${code} reason=game_already_started status=${room.status}`);
     res.status(400).json({ error: 'Гра вже почалась' });
     return;
   }
 
   const players = await getPlayers(code);
+  logger.info(`[GameController] game:start attempt | roomCode=${code} playerId=${parsed.data.playerId} playersCount=${players.length} maxPlayers=${room.max_players}`);
+  
   const player = players.find((p) => p.id === parsed.data.playerId);
   if (!player?.is_creator) {
+    logger.warn(`[GameController] game:start failed | roomCode=${code} playerId=${parsed.data.playerId} reason=not_creator`);
     res.status(403).json({ error: 'Тільки творець може почати гру' });
     return;
   }
 
-  logger.info(`[GameController] game:start | roomCode=${code} playerId=${parsed.data.playerId}`);
+  logger.info(`[GameController] game:start | roomCode=${code} playerId=${parsed.data.playerId} starting game with ${players.length} players`);
   await engineStartGame(code);
   res.json({ ok: true });
 }
