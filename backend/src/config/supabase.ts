@@ -16,8 +16,15 @@ export const supabase = createClient(url, key, {
 
 logger.info('[Supabase] Client initialized');
 
-// Broadcast an event to all Supabase Realtime subscribers of a room channel.
-// Uses the REST broadcast endpoint — works from Node.js without subscribing to the channel.
+/**
+ * Broadcast an event to all Supabase Realtime subscribers of a room channel.
+ *
+ * Uses the documented Supabase REST broadcast endpoint
+ * (POST /realtime/v1/api/broadcast) so no channel subscription is required
+ * on the server side and there is no unbounded channel accumulation.
+ *
+ * Payload contract is unchanged — frontend listeners receive the same shape.
+ */
 export async function broadcastToRoom(
   roomCode: string,
   event: string,
@@ -25,15 +32,36 @@ export async function broadcastToRoom(
 ): Promise<void> {
   logger.info(`[Supabase] Broadcasting | roomCode=${roomCode} event=${event}`);
 
-  // Use Supabase client's channel to broadcast - more reliable than REST API
-  const channel = supabase.channel(`room:${roomCode}`);
+  const broadcastUrl = `${url}/realtime/v1/api/broadcast`;
+  const body = JSON.stringify({
+    messages: [
+      {
+        // Channel topic must match what the Flutter client subscribes to:
+        // supabase.channel('room:<code>') → topic 'realtime:room:<code>'
+        topic: `realtime:room:${roomCode}`,
+        event,
+        payload,
+      },
+    ],
+  });
 
-  try {
-    // The realtime client warns to use httpSend for REST delivery when not subscribed
-    await (channel as any).httpSend(event, payload);
-    logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
-  } catch (err) {
-    logger.error(`[Supabase] Broadcast failed | roomCode=${roomCode} event=${event} error=${err}`);
-    throw err;
+  const res = await fetch(broadcastUrl, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${key as string}`,
+      'apikey': key as string,
+    } satisfies Record<string, string>,
+    body,
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    logger.error(
+      `[Supabase] Broadcast failed | roomCode=${roomCode} event=${event} status=${res.status} body=${text}`,
+    );
+    throw new Error(`Broadcast failed: ${res.status}`);
   }
+
+  logger.info(`[Supabase] Broadcast sent | roomCode=${roomCode} event=${event}`);
 }

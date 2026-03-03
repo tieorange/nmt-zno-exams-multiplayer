@@ -8,9 +8,25 @@ import '../cubits/room_cubit/room_cubit.dart';
 import '../cubits/room_cubit/room_state.dart';
 import '../widgets/answer_button.dart';
 
-class RoundRevealScreen extends StatelessWidget {
+class RoundRevealScreen extends StatefulWidget {
   final String roomCode;
   const RoundRevealScreen({super.key, required this.roomCode});
+
+  @override
+  State<RoundRevealScreen> createState() => _RoundRevealScreenState();
+}
+
+class _RoundRevealScreenState extends State<RoundRevealScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (context.read<RoomCubit>().myPlayerId == null) {
+        context.go('/');
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,9 +35,9 @@ class RoundRevealScreen extends StatelessWidget {
       listenWhen: (_, curr) => curr is QuizQuestion || curr is QuizGameEnded,
       listener: (ctx, state) {
         if (state is QuizQuestion) {
-          ctx.go('/room/$roomCode/game');
+          ctx.go('/room/${widget.roomCode}/game');
         } else if (state is QuizGameEnded) {
-          ctx.go('/room/$roomCode/results');
+          ctx.go('/room/${widget.roomCode}/results');
         }
       },
       builder: (ctx, state) {

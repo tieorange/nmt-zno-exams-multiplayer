@@ -30,10 +30,15 @@ void main() async {
     logger: logger,
   );
 
-  // Forward playerId + roomCode to QuizCubit after join so it can track "my" answer
+  // Forward playerId + roomCode to QuizCubit after join so it can track "my" answer.
+  // Also bootstrap quiz state from snapshot when rejoining an active round.
   roomCubit.stream.listen((_) {
     if (roomCubit.myPlayerId != null && roomCubit.state.code.isNotEmpty) {
       quizCubit.setContext(roomCubit.myPlayerId!, roomCubit.state.code);
+    }
+    final snapshot = roomCubit.consumePendingSnapshot();
+    if (snapshot != null) {
+      quizCubit.bootstrapFromSnapshot(snapshot);
     }
   });
 

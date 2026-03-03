@@ -10,6 +10,18 @@ class GameCubit extends Cubit<GameState> {
   GameCubit({required this.apiService, required this.logger})
     : super(const GameInitial());
 
+  Future<void> loadSubjects() async {
+    emit(const GameSubjectsLoading());
+    try {
+      final subjects = await apiService.getSubjects();
+      logger.i('[GameCubit] subjects loaded | count=${subjects.length}');
+      emit(GameSubjectsLoaded(subjects));
+    } catch (e) {
+      logger.e('[GameCubit] loadSubjects failed | err=$e');
+      emit(const GameError('Не вдалося завантажити предмети'));
+    }
+  }
+
   Future<void> createRoom(String subject, int maxPlayers) async {
     emit(const GameCreating());
     try {

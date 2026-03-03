@@ -35,6 +35,30 @@ class SupabaseService {
     );
   }
 
+  /// Builds a standard broadcast callback: unwraps the nested payload if present,
+  /// logs at debug + info level, runs an optional [sideEffect] (e.g. security checks),
+  /// and emits the event onto the shared stream.
+  void Function(Map<String, dynamic>) _buildCallback(
+    String roomCode,
+    RealtimeEventType eventType,
+    String eventName, {
+    String Function(Map<String, dynamic>)? extra,
+    void Function(Map<String, dynamic>)? sideEffect,
+  }) {
+    return (raw) {
+      final p = raw.containsKey('payload')
+          ? raw['payload'] as Map<String, dynamic>
+          : raw;
+      logger.d('[SupabaseService] RAW $eventName | raw:\n$raw');
+      sideEffect?.call(p);
+      final extraLog = extra != null ? ' ${extra(p)}' : '';
+      logger.i(
+        '[SupabaseService] recv $eventName | roomCode=$roomCode$extraLog rawKeys=${raw.keys.toList()}',
+      );
+      _emit(eventType, p);
+    };
+  }
+
   void subscribeToRoom(String roomCode) {
     logger.i('[SupabaseService] subscribing to room | roomCode=$roomCode');
     if (_channel != null) {
@@ -44,99 +68,63 @@ class SupabaseService {
         .channel('room:$roomCode')
         .onBroadcast(
           event: 'room:state',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW room:state | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv room:state | roomCode=$roomCode payloadKeys=${p.keys.toList()} rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.roomState, p);
-          },
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.roomState,
+            'room:state',
+            extra: (p) => 'payloadKeys=${p.keys.toList()}',
+          ),
         )
         .onBroadcast(
           event: 'game:start',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW game:start | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv game:start | roomCode=$roomCode payloadKeys=${p.keys.toList()} rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.gameStart, p);
-          },
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.gameStart,
+            'game:start',
+            extra: (p) => 'payloadKeys=${p.keys.toList()}',
+          ),
         )
         .onBroadcast(
           event: 'question:new',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW question:new | raw:\n$raw');
-            if (p.containsKey('correct_answer_index')) {
-              logger.e(
-                '[SupabaseService] SECURITY VIOLATION: correct_answer_index in question:new!',
-              );
-            }
-            logger.i(
-              '[SupabaseService] recv question:new | roomCode=$roomCode questionId=${p['id']} rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.questionNew, p);
-          },
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.questionNew,
+            'question:new',
+            extra: (p) => 'questionId=${p['id']}',
+            sideEffect: (p) {
+              if (p.containsKey('correct_answer_index')) {
+                logger.e(
+                  '[SupabaseService] SECURITY VIOLATION: correct_answer_index in question:new!',
+                );
+              }
+            },
+          ),
         )
         .onBroadcast(
           event: 'round:update',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW round:update | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv round:update | roomCode=$roomCode rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.roundUpdate, p);
-          },
+          callback: _buildCallback(roomCode, RealtimeEventType.roundUpdate, 'round:update'),
         )
         .onBroadcast(
           event: 'round:reveal',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW round:reveal | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv round:reveal | roomCode=$roomCode correctIndex=${p['correctIndex']} rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.roundReveal, p);
-          },
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.roundReveal,
+            'round:reveal',
+            extra: (p) => 'correctIndex=${p['correctIndex']}',
+          ),
         )
         .onBroadcast(
           event: 'game:end',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW game:end | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv game:end | roomCode=$roomCode rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.gameEnd, p);
-          },
+          callback: _buildCallback(roomCode, RealtimeEventType.gameEnd, 'game:end'),
         )
         .onBroadcast(
           event: 'player:disconnected',
-          callback: (raw) {
-            final p = raw.containsKey('payload')
-                ? raw['payload'] as Map<String, dynamic>
-                : raw;
-            logger.d('[SupabaseService] RAW player:disconnected | raw:\n$raw');
-            logger.i(
-              '[SupabaseService] recv player:disconnected | roomCode=$roomCode playerId=${p['playerId']} rawKeys=${raw.keys.toList()}',
-            );
-            _emit(RealtimeEventType.playerDisconnected, p);
-          },
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.playerDisconnected,
+            'player:disconnected',
+            extra: (p) => 'playerId=${p['playerId']}',
+          ),
         )
         .subscribe((status, err) {
           if (status == RealtimeSubscribeStatus.subscribed) {

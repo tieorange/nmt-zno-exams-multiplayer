@@ -29,3 +29,16 @@ class GameError extends GameState {
   @override
   List<Object?> get props => [message];
 }
+
+class GameSubjectsLoading extends GameState {
+  const GameSubjectsLoading();
+  @override
+  List<Object?> get props => [];
+}
+
+class GameSubjectsLoaded extends GameState {
+  final List<Map<String, dynamic>> subjects;
+  const GameSubjectsLoaded(this.subjects);
+  @override
+  List<Object?> get props => [subjects];
+}

@@ -120,7 +120,8 @@ export async function joinRoom(req: Request, res: Response) {
           })),
         });
 
-        res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator });
+        const currentQuestion = room.status === 'playing' ? getCurrentClientQuestion(code) : null;
+        res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator, status: room.status, currentQuestion });
         return;
       }
     }
@@ -168,7 +169,7 @@ export async function joinRoom(req: Request, res: Response) {
   });
 
   logger.info(`[RoomController] Player joined | roomCode=${code} playerId=${playerId} name=${name} isCreator=${isCreator}`);
-  res.json({ playerId, name, color, isCreator });
+  res.json({ playerId, name, color, isCreator, status: room.status });
 }
 
 export async function heartbeat(req: Request, res: Response) {

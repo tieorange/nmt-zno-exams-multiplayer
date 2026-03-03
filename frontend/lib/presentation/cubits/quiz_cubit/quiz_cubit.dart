@@ -33,6 +33,51 @@ class QuizCubit extends Cubit<QuizState> {
     _roomCode = roomCode;
   }
 
+  /// Bootstrap quiz state from a server snapshot on rejoin.
+  /// Restores the current question and starts the local countdown timer.
+  void bootstrapFromSnapshot(Map<String, dynamic> snapshot) {
+    try {
+      _currentQuestion = ClientQuestion.fromJson(snapshot);
+      // Backend questionIndex is 0-based; QuizCubit._questionIndex is 1-based for display.
+      // Add 1 to match what _handleNewQuestion would have set.
+      final rawIndex = snapshot['questionIndex'] as int? ?? 0;
+      _questionIndex = rawIndex + 1;
+      // Restore totalQuestions from snapshot so "Q x/N" shows correctly without game:start.
+      _totalQuestions = snapshot['totalQuestions'] as int? ?? _totalQuestions;
+      // Sync timer duration from snapshot (overrides the game:start value we may have missed).
+      _timerMs = snapshot['timerMs'] as int? ?? _timerMs;
+
+      // Compute how much time is actually left on the server's timer so the
+      // rejoining player sees the correct countdown rather than a full reset.
+      final roundStartedAtStr = snapshot['roundStartedAt'] as String?;
+      final Duration remaining;
+      if (roundStartedAtStr != null) {
+        final roundStartedAt = DateTime.parse(roundStartedAtStr);
+        final elapsed = DateTime.now().difference(roundStartedAt);
+        final remainingMs = (_timerMs - elapsed.inMilliseconds).clamp(0, _timerMs);
+        remaining = Duration(milliseconds: remainingMs);
+      } else {
+        remaining = Duration(milliseconds: _timerMs);
+      }
+
+      logger.i(
+        '[QuizCubit] bootstrapFromSnapshot | questionId=${_currentQuestion!.id} index=$_questionIndex/$_totalQuestions remainingMs=${remaining.inMilliseconds}',
+      );
+      emit(
+        QuizQuestion(
+          question: _currentQuestion!,
+          questionIndex: _questionIndex,
+          totalQuestions: _totalQuestions,
+          timeRemaining: remaining,
+          totalTime: Duration(milliseconds: _timerMs),
+        ),
+      );
+      _startTimer(remaining);
+    } catch (e) {
+      logger.e('[QuizCubit] bootstrapFromSnapshot failed | err=$e');
+    }
+  }
+
   void _handleEvent(RealtimeEvent event) {
     switch (event.type) {
       case RealtimeEventType.gameStart:
@@ -102,10 +147,9 @@ class QuizCubit extends Cubit<QuizState> {
     }
   }
 
-  void _startTimer() {
+  void _startTimer([Duration? initialRemaining]) {
     _timer?.cancel();
-    // Bug 8 fix: use server-provided timer duration
-    var remaining = Duration(milliseconds: _timerMs);
+    var remaining = initialRemaining ?? Duration(milliseconds: _timerMs);
     _timer = Timer.periodic(const Duration(seconds: 1), (_) {
       remaining -= const Duration(seconds: 1);
       if (remaining.isNegative) {

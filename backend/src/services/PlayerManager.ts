@@ -1,4 +1,4 @@
-import { removePlayer, getPlayers, setCreator, deleteRoom, getRoom } from '../data/repositories/RoomRepository.js';
+import { removePlayer, getPlayers, setCreator, clearAllCreators, deleteRoom, getRoom } from '../data/repositories/RoomRepository.js';
 import { broadcastToRoom } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
 import { clearRoom } from './NameGenerator.js';
@@ -82,10 +82,14 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
             return;
         }
 
-        // Check if we need to reassign creator
-        const hasCreator = players.some((p) => p.is_creator);
-        if (!hasCreator) {
-            // Reassign to the oldest remaining ONLINE player preferred, or just oldest
+        // Check if there is an ONLINE creator (not just any player with is_creator flag in DB).
+        // During active games, disconnected players stay in DB, so hasCreator would be true
+        // even if the creator is offline — we must check pings liveness.
+        const hasOnlineCreator = players.some((p) => p.is_creator && pings.has(p.id));
+        if (!hasOnlineCreator) {
+            // Clear stale creator flag(s) before assigning a new one
+            await clearAllCreators(roomCode);
+            // Reassign to the oldest remaining ONLINE player, or oldest overall as fallback
             const candidates = onlinePlayers.length > 0 ? onlinePlayers : players;
             const oldestPlayer = candidates.sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())[0];
             await setCreator(roomCode, oldestPlayer.id);

@@ -114,6 +114,16 @@ class ApiService {
     }
   }
 
+  Future<Map<String, dynamic>> getRoomState(String roomCode) async {
+    logger.i('[ApiService] GET /api/rooms/$roomCode');
+    final res = await http.get(
+      Uri.parse('$baseUrl/api/rooms/${roomCode.toUpperCase()}'),
+    );
+    if (res.statusCode != 200) throw Exception('getRoomState failed: ${res.body}');
+    return jsonDecode(res.body) as Map<String, dynamic>;
+    // Returns: { code, subject, status, maxPlayers, currentQuestionIndex, currentQuestion?, players[] }
+  }
+
   Future<void> nextQuestion(String roomCode, String playerId) async {
     logger.i('[ApiService] POST /api/rooms/$roomCode/next-question | playerId=$playerId');
     final res = await http.post(

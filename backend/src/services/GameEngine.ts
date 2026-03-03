@@ -8,11 +8,9 @@ import {
   resetScores,
   saveRoundAnswer,
   getRoundAnswers,
-  type RoundAnswer,
 } from '../data/repositories/RoomRepository.js';
 import {
   getRandomQuestions,
-  getQuestionsByIds,
   type Question,
 } from '../data/repositories/QuestionRepository.js';
 import { clearRoom } from './NameGenerator.js';
@@ -32,6 +30,7 @@ interface RoundState {
   timer: ReturnType<typeof setTimeout>;
   questions: Question[];   // stored here so submitAnswer can validate answerIndex inline
   questionIndex: number;
+  roundStartedAt: string;  // ISO timestamp — used by rejoin snapshot to compute remaining time
 }
 
 // Holds state between revealRound and the creator pressing "next question".
@@ -58,39 +57,10 @@ const startingMutex = new Set<string>();
 export async function startGame(roomCode: string): Promise<void> {
   if (startingMutex.has(roomCode)) return;
   startingMutex.add(roomCode);
-
   try {
     const room = await getRoom(roomCode);
     if (!room || room.status !== 'waiting') return;
-
-    const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
-    if (questions.length < QUESTION_COUNT) {
-      logger.warn(
-        `[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`,
-      );
-    }
-
-    const questionIds = questions.map((q) => q.id);
-
-    // Cancel any leftover cleanup timeout for this room (e.g. restart scenario)
-    const existingCleanup = cleanupTimeouts.get(roomCode);
-    if (existingCleanup) {
-      clearTimeout(existingCleanup);
-      cleanupTimeouts.delete(roomCode);
-    }
-
-    await updateRoom(roomCode, {
-      status: 'playing',
-      question_ids: questionIds,
-      current_question_index: 0,
-    });
-
-    logger.info(
-      `[GameEngine] Game started | roomCode=${roomCode} questions=${questions.length}`,
-    );
-
-    await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
-    await startRound(roomCode, 0, questions);
+    await runGame(roomCode, room.subject, 'Game started');
   } finally {
     startingMutex.delete(roomCode);
   }
@@ -99,23 +69,9 @@ export async function startGame(roomCode: string): Promise<void> {
 export async function restartGame(roomCode: string): Promise<void> {
   if (startingMutex.has(roomCode)) return;
   startingMutex.add(roomCode);
-
   try {
     const room = await getRoom(roomCode);
     if (!room || room.status !== 'finished') return;
-
-    const questions = await getRandomQuestions(room.subject, QUESTION_COUNT);
-    if (questions.length < QUESTION_COUNT) {
-      logger.warn(`[GameEngine] Not enough questions | roomCode=${roomCode} subject=${room.subject} got=${questions.length} need=${QUESTION_COUNT}`);
-    }
-
-    const questionIds = questions.map((q) => q.id);
-
-    const existingCleanup = cleanupTimeouts.get(roomCode);
-    if (existingCleanup) {
-      clearTimeout(existingCleanup);
-      cleanupTimeouts.delete(roomCode);
-    }
 
     // Cancel any pending "waiting for next question" state from the previous game
     const existingPending = pendingNextRound.get(roomCode);
@@ -124,22 +80,39 @@ export async function restartGame(roomCode: string): Promise<void> {
       pendingNextRound.delete(roomCode);
     }
 
-    await updateRoom(roomCode, {
-      status: 'playing',
-      question_ids: questionIds,
-      current_question_index: 0,
-    });
-
-    logger.info(`[GameEngine] Game restarted | roomCode=${roomCode} questions=${questions.length}`);
-
-    // Bug 9 Fix: Zero out scores on restart
     await resetScores(roomCode);
-
-    await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
-    await startRound(roomCode, 0, questions);
+    await runGame(roomCode, room.subject, 'Game restarted');
   } finally {
     startingMutex.delete(roomCode);
   }
+}
+
+// Shared: fetch questions, update DB to 'playing', broadcast game:start, begin round 0.
+// Called by both startGame and restartGame after their status checks and prereqs.
+async function runGame(roomCode: string, subject: string, logLabel: string): Promise<void> {
+  const questions = await getRandomQuestions(subject, QUESTION_COUNT);
+  if (questions.length < QUESTION_COUNT) {
+    logger.warn(
+      `[GameEngine] Not enough questions | roomCode=${roomCode} subject=${subject} got=${questions.length} need=${QUESTION_COUNT}`,
+    );
+  }
+
+  // Cancel any leftover cleanup timeout (e.g. 1-hour post-game cleanup)
+  const existingCleanup = cleanupTimeouts.get(roomCode);
+  if (existingCleanup) {
+    clearTimeout(existingCleanup);
+    cleanupTimeouts.delete(roomCode);
+  }
+
+  await updateRoom(roomCode, {
+    status: 'playing',
+    question_ids: questions.map((q) => q.id),
+    current_question_index: 0,
+  });
+
+  logger.info(`[GameEngine] ${logLabel} | roomCode=${roomCode} questions=${questions.length}`);
+  await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
+  await startRound(roomCode, 0, questions);
 }
 
 async function startRound(
@@ -151,9 +124,10 @@ async function startRound(
   if (!room || room.status !== 'playing') return;
 
   const questionDoc = questions[questionIndex];
+  const roundStartedAt = new Date().toISOString();
   await updateRoom(roomCode, {
     current_question_index: questionIndex,
-    round_started_at: new Date().toISOString(),
+    round_started_at: roundStartedAt,
   });
 
   // SECURITY CRITICAL: strip correct_answer_index before broadcasting
@@ -175,11 +149,8 @@ async function startRound(
   const answers = new Map<string, number | null>();
   players.forEach((p) => answers.set(p.id, null));
 
-  const timer = setTimeout(
-    () => void revealRound(roomCode, questions, questionIndex),
-    ROUND_TIMER_MS,
-  );
-  roundState.set(roomCode, { answers, timer, questions, questionIndex });
+  const timer = setTimeout(() => void revealRound(roomCode), ROUND_TIMER_MS);
+  roundState.set(roomCode, { answers, timer, questions, questionIndex, roundStartedAt });
 }
 
 export async function submitAnswer(
@@ -233,21 +204,18 @@ export async function submitAnswer(
   });
   if (allAnswered) {
     clearTimeout(state.timer);
-    await revealRound(roomCode, state.questions, state.questionIndex);
+    await revealRound(roomCode);
   }
 }
 
-async function revealRound(
-  roomCode: string,
-  questions: Question[],
-  questionIndex: number,
-): Promise<void> {
+async function revealRound(roomCode: string): Promise<void> {
   // Delete from roundState IMMEDIATELY to prevent double-reveal from concurrent calls
   // (race: timer fires and submitAnswer both trigger reveal at same async tick)
   const state = roundState.get(roomCode);
   if (!state) return;
   roundState.delete(roomCode);
 
+  const { questions, questionIndex } = state;
   const questionDoc = questions[questionIndex];
   const correctIndex = questionDoc.correct_answer_index;
   const unanswered = [...state.answers.entries()]
@@ -399,13 +367,6 @@ async function safeBroadcast(roomCode: string, event: string, payload: unknown):
   }
 }
 
-// Preserves the original random order from startGame (do NOT sort by id)
-async function fetchQuestionsOrdered(questionIds: string[]): Promise<Question[]> {
-  const docs = await getQuestionsByIds(questionIds);
-  const docMap = new Map(docs.map((d) => [d.id, d]));
-  return questionIds.map((id) => docMap.get(id)!);
-}
-
 /**
  * Returns the current question payload for a given room if a round is active.
  * Used for mid-game reconnections to sync the client UI.
@@ -420,7 +381,14 @@ export function getCurrentClientQuestion(roomCode: string) {
     subject: q.subject,
     text: q.text,
     choices: q.choices,
+    // questionIndex is 0-based (matches the questions array index).
+    // The Flutter QuizCubit converts this to 1-based for display.
     questionIndex: state.questionIndex,
+    // Include total so the frontend can show "Q x / total" correctly on rejoin.
+    totalQuestions: state.questions.length,
+    // Timer metadata so the frontend can compute how much time is left on rejoin.
+    roundStartedAt: state.roundStartedAt,
+    timerMs: ROUND_TIMER_MS,
   };
 }
 

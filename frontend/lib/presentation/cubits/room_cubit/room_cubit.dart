@@ -18,6 +18,14 @@ class RoomCubit extends Cubit<RoomState> {
   String? myName;
   bool myIsCreator = false;
 
+  // Pending game snapshot for rejoin recovery — consumed once by main.dart coordinator
+  Map<String, dynamic>? _pendingSnapshot;
+  Map<String, dynamic>? consumePendingSnapshot() {
+    final s = _pendingSnapshot;
+    _pendingSnapshot = null;
+    return s;
+  }
+
   RoomCubit({required this.supabaseService, required this.apiService, required this.logger})
     : super(const RoomState()) {
     _sub = supabaseService.events.listen(_handleEvent);
@@ -54,11 +62,25 @@ class RoomCubit extends Cubit<RoomState> {
         currentPlayers.add(myPlayer);
       }
 
+      // The join response includes status and currentQuestion (on rejoin) so we
+      // can bootstrap QuizCubit immediately without an extra HTTP round-trip.
+      final statusStr = result['status'] as String? ?? 'waiting';
+      final resolvedStatus = switch (statusStr) {
+        'playing' => RoomStatus.playing,
+        'finished' => RoomStatus.finished,
+        _ => RoomStatus.waiting,
+      };
+      final currentQuestion = result['currentQuestion'] as Map<String, dynamic>?;
+      if (currentQuestion != null) {
+        _pendingSnapshot = currentQuestion;
+        logger.i('[RoomCubit] rejoin snapshot from join response | questionId=${currentQuestion['id']}');
+      }
+
       emit(
         state.copyWith(
           code: roomCode.toUpperCase(),
           players: currentPlayers,
-          status: RoomStatus.waiting,
+          status: resolvedStatus,
         ),
       );
 

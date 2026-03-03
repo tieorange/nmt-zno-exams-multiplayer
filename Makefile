@@ -13,12 +13,17 @@ FLUTTER_DEFINES := \
 help:
 	@echo "🎮 NMT Quiz Multiplayer — Make Commands"
 	@echo ""
+	@echo "Toolchain requirements:"
+	@echo "  Flutter/Dart : >=3.9.2  (run: flutter --version)"
+	@echo "  Node.js      : >=20     (run: node --version)"
+	@echo "  Docker       : required for local Supabase"
+	@echo ""
 	@echo "Available commands:"
 	@echo "  make supabase-start   - Start local Supabase Docker containers"
 	@echo "  make supabase-stop    - Stop local Supabase"
 	@echo "  make supabase-push    - Push database migrations"
-	@echo "  make backend          - Run Node.js backend (dev mode)"
-	@echo "  make frontend         - Run Flutter Web frontend (auto-injects Supabase env)"
+	@echo "  make backend          - Run Node.js backend (dev mode, port 3000)"
+	@echo "  make frontend         - Run Flutter Web frontend (pinned port 5000)"
 	@echo "  make all              - Run Supabase, Backend, and Frontend together"
 	@echo "  make seed             - Seed the local database with questions"
 	@echo "  make lint             - Run linter for both Backend and Frontend"
@@ -54,14 +59,14 @@ frontend:
 	@echo "Starting frontend web app..."
 	@echo "  → SUPABASE_URL=$(SUPABASE_URL)"
 	@echo "  → API_URL=$(API_URL)"
-	cd frontend && flutter run -d chrome $(FLUTTER_DEFINES)
+	cd frontend && flutter run -d chrome --web-port=5000 $(FLUTTER_DEFINES)
 
 # --- Combined & Helper Commands ---
 all: supabase-start kill-port-3000
 	@echo "Starting everything! 🚀"
 	@echo "Starting Backend and Frontend in parallel..."
 	@# Run backend in the background, run frontend in the foreground
-	@(cd backend && npm run dev &) && (cd frontend && flutter run -d chrome $(FLUTTER_DEFINES))
+	@(cd backend && npm run dev &) && (cd frontend && flutter run -d chrome --web-port=5000 $(FLUTTER_DEFINES))
 
 seed:
 	@echo "Seeding local database..."

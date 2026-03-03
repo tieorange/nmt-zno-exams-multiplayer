@@ -10,18 +10,36 @@ import '../widgets/answer_button.dart';
 import '../widgets/player_chip.dart';
 import '../widgets/timer_bar.dart';
 
-class GameplayScreen extends StatelessWidget {
+class GameplayScreen extends StatefulWidget {
   final String roomCode;
   const GameplayScreen({super.key, required this.roomCode});
+
+  @override
+  State<GameplayScreen> createState() => _GameplayScreenState();
+}
+
+class _GameplayScreenState extends State<GameplayScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Route guard: redirect to home if player hasn't joined
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final roomCubit = context.read<RoomCubit>();
+      if (roomCubit.myPlayerId == null) {
+        context.go('/');
+      }
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<QuizCubit, QuizState>(
       listener: (ctx, state) {
         if (state is QuizReveal) {
-          ctx.go('/room/$roomCode/reveal');
+          ctx.go('/room/${widget.roomCode}/reveal');
         } else if (state is QuizGameEnded) {
-          ctx.go('/room/$roomCode/results');
+          ctx.go('/room/${widget.roomCode}/results');
         }
       },
       builder: (ctx, state) {

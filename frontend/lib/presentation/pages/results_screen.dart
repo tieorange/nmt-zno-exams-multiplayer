@@ -19,13 +19,20 @@ class _ResultsScreenState extends State<ResultsScreen> {
   late final ConfettiController _confetti = ConfettiController(
     duration: const Duration(seconds: 5),
   );
+  bool _restartLoading = false;
 
   @override
   void initState() {
     super.initState();
-    // Bug 10 fix: play confetti only if the current player won
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
       final roomCubit = context.read<RoomCubit>();
+      // Route guard: bounce to home if player never joined
+      if (roomCubit.myPlayerId == null) {
+        context.go('/');
+        return;
+      }
+      // Play confetti only if the current player won
       final quizState = context.read<QuizCubit>().state;
       if (quizState is QuizGameEnded && quizState.scoreboard.isNotEmpty) {
         final winner = quizState.scoreboard.first;
@@ -42,9 +49,37 @@ class _ResultsScreenState extends State<ResultsScreen> {
     super.dispose();
   }
 
+  Future<void> _restartGame() async {
+    final roomCubit = context.read<RoomCubit>();
+    if (roomCubit.myPlayerId == null) return;
+    setState(() => _restartLoading = true);
+    try {
+      await roomCubit.apiService.restartGame(
+        roomCubit.state.code,
+        roomCubit.myPlayerId!,
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Не вдалося перезапустити: $e'),
+            backgroundColor: Colors.red.shade800,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _restartLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    return BlocBuilder<QuizCubit, QuizState>(
+    return BlocConsumer<QuizCubit, QuizState>(
+      // Navigate to game when a restart sends a new question
+      listenWhen: (_, curr) => curr is QuizQuestion,
+      listener: (ctx, _) {
+        ctx.go('/room/${widget.roomCode}/game');
+      },
       builder: (ctx, state) {
         final scoreboard = state is QuizGameEnded
             ? state.scoreboard
@@ -169,14 +204,26 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           ),
                         ),
                         const SizedBox(height: 20),
-                        if (isCreator)
+                        if (isCreator) ...[
+                          // Rematch in the same room
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: () => ctx.go('/create'),
-                              icon: const Icon(Icons.refresh),
+                              onPressed: _restartLoading
+                                  ? null
+                                  : _restartGame,
+                              icon: _restartLoading
+                                  ? const SizedBox(
+                                      width: 18,
+                                      height: 18,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                  : const Icon(Icons.replay_rounded),
                               label: const Text(
-                                'Нова тема',
+                                'Грати знову',
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w600,
@@ -193,8 +240,37 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                 ),
                               ),
                             ),
-                          )
-                        else
+                          ),
+                          const SizedBox(height: 10),
+                          // New topic in a fresh room
+                          SizedBox(
+                            width: double.infinity,
+                            child: OutlinedButton.icon(
+                              onPressed: () => ctx.go('/create'),
+                              icon: const Icon(Icons.add_circle_outline),
+                              label: const Text(
+                                'Нова тема',
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(
+                                  color: Color(0xFF4ECDC4),
+                                  width: 1.5,
+                                ),
+                                padding: const EdgeInsets.symmetric(
+                                  vertical: 16,
+                                ),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ] else
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
