@@ -54,7 +54,10 @@ class QuizCubit extends Cubit<QuizState> {
       if (roundStartedAtStr != null) {
         final roundStartedAt = DateTime.parse(roundStartedAtStr);
         final elapsed = DateTime.now().difference(roundStartedAt);
-        final remainingMs = (_timerMs - elapsed.inMilliseconds).clamp(0, _timerMs);
+        final remainingMs = (_timerMs - elapsed.inMilliseconds).clamp(
+          0,
+          _timerMs,
+        );
         remaining = Duration(milliseconds: remainingMs);
       } else {
         remaining = Duration(milliseconds: _timerMs);
@@ -75,6 +78,31 @@ class QuizCubit extends Cubit<QuizState> {
       _startTimer(remaining);
     } catch (e) {
       logger.e('[QuizCubit] bootstrapFromSnapshot failed | err=$e');
+    }
+  }
+
+  /// Fallback recovery for cases when realtime `question:new` was missed.
+  /// If the room is already playing and has a currentQuestion snapshot,
+  /// bootstrap quiz state from REST.
+  Future<void> recoverFromRoomSnapshot(String roomCode) async {
+    if (state is QuizQuestion) return;
+    try {
+      final room = await apiService.getRoomState(roomCode);
+      final snapshot = room['currentQuestion'] as Map<String, dynamic>?;
+      if (snapshot == null) {
+        logger.w(
+          '[QuizCubit] recoverFromRoomSnapshot | no currentQuestion roomCode=$roomCode',
+        );
+        return;
+      }
+      logger.i(
+        '[QuizCubit] recoverFromRoomSnapshot | roomCode=$roomCode questionId=${snapshot['id']}',
+      );
+      bootstrapFromSnapshot(snapshot);
+    } catch (e) {
+      logger.w(
+        '[QuizCubit] recoverFromRoomSnapshot failed | roomCode=$roomCode err=$e',
+      );
     }
   }
 

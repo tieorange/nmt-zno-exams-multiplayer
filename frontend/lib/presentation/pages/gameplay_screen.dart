@@ -23,12 +23,17 @@ class _GameplayScreenState extends State<GameplayScreen> {
   void initState() {
     super.initState();
     // Route guard: redirect to home if player hasn't joined
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
       final roomCubit = context.read<RoomCubit>();
       if (roomCubit.myPlayerId == null) {
         context.go('/');
+        return;
       }
+      // Fallback: if realtime question event was missed, recover via REST snapshot.
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+      await context.read<QuizCubit>().recoverFromRoomSnapshot(widget.roomCode);
     });
   }
 
@@ -107,24 +112,26 @@ class _GameplayScreenState extends State<GameplayScreen> {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: q.question.choices.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
+                            separatorBuilder:
+                                (_, __) => const SizedBox(height: 10),
                             itemBuilder: (ctx, i) {
                               AnswerState answerState = AnswerState.idle;
                               if (q.myAnswer != null) {
-                                answerState = q.myAnswer == i
-                                    ? AnswerState.selected
-                                    : AnswerState.idle;
+                                answerState =
+                                    q.myAnswer == i
+                                        ? AnswerState.selected
+                                        : AnswerState.idle;
                               }
                               return AnswerButton(
                                     text: q.question.choices[i],
                                     state: answerState,
                                     // Bug 11 fix: disable all buttons once player has answered
-                                    onTap: q.myAnswer == null
-                                        ? () => ctx
-                                              .read<QuizCubit>()
-                                              .submitAnswer(i)
-                                        : null,
+                                    onTap:
+                                        q.myAnswer == null
+                                            ? () => ctx
+                                                .read<QuizCubit>()
+                                                .submitAnswer(i)
+                                            : null,
                                   )
                                   .animate()
                                   .fadeIn(
@@ -137,20 +144,24 @@ class _GameplayScreenState extends State<GameplayScreen> {
                           const SizedBox(height: 12),
                           // Player status chips
                           BlocBuilder<RoomCubit, RoomState>(
-                            builder: (ctx, roomState) => Wrap(
-                              spacing: 8,
-                              runSpacing: 8,
-                              children: roomState.players
-                                  .map(
-                                    (p) => PlayerChip(
-                                      player: p,
-                                      hasAnswered:
-                                          q.playerAnswers.containsKey(p.id) &&
-                                          q.playerAnswers[p.id] != null,
-                                    ),
-                                  )
-                                  .toList(),
-                            ),
+                            builder:
+                                (ctx, roomState) => Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  children:
+                                      roomState.players
+                                          .map(
+                                            (p) => PlayerChip(
+                                              player: p,
+                                              hasAnswered:
+                                                  q.playerAnswers.containsKey(
+                                                    p.id,
+                                                  ) &&
+                                                  q.playerAnswers[p.id] != null,
+                                            ),
+                                          )
+                                          .toList(),
+                                ),
                           ),
                         ],
                       ),

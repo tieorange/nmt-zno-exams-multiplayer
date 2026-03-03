@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
@@ -16,12 +17,29 @@ class RoomLobbyScreen extends StatefulWidget {
 }
 
 class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
+  Timer? _roomSyncTimer;
+
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<RoomCubit>().joinRoom(widget.roomCode);
     });
+
+    // Fallback sync: if realtime events are missed, poll room state while waiting.
+    _roomSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (!mounted) return;
+      final cubit = context.read<RoomCubit>();
+      if (cubit.state.status == RoomStatus.waiting) {
+        unawaited(cubit.syncRoomState());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _roomSyncTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -187,14 +205,15 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
-                      children: state.players
-                          .map(
-                            (p) => PlayerChip(player: p)
-                                .animate()
-                                .fadeIn(duration: 300.ms)
-                                .scale(begin: const Offset(0.7, 0.7)),
-                          )
-                          .toList(),
+                      children:
+                          state.players
+                              .map(
+                                (p) => PlayerChip(player: p)
+                                    .animate()
+                                    .fadeIn(duration: 300.ms)
+                                    .scale(begin: const Offset(0.7, 0.7)),
+                              )
+                              .toList(),
                     ),
                     const Spacer(),
                     if (state.status == RoomStatus.error)
@@ -219,7 +238,11 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                         return SizedBox(
                           width: double.infinity,
                           child: FilledButton(
-                            onPressed: () => cubit.startGame(),
+                            onPressed:
+                                state.isStartingGame ||
+                                        state.status != RoomStatus.waiting
+                                    ? null
+                                    : () => cubit.startGame(),
                             style: FilledButton.styleFrom(
                               backgroundColor: const Color(0xFF4ECDC4),
                               foregroundColor: Colors.black,
@@ -228,13 +251,23 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
                                 borderRadius: BorderRadius.circular(16),
                               ),
                             ),
-                            child: const Text(
-                              'Почати гру 🚀',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
+                            child:
+                                state.isStartingGame
+                                    ? const SizedBox(
+                                      width: 22,
+                                      height: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: Colors.black,
+                                      ),
+                                    )
+                                    : const Text(
+                                      'Почати гру 🚀',
+                                      style: TextStyle(
+                                        fontSize: 18,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
                           ),
                         );
                       },

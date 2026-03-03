@@ -7,6 +7,7 @@ import 'services/supabase_service.dart';
 import 'services/api_service.dart';
 import 'presentation/cubits/room_cubit/room_cubit.dart';
 import 'presentation/cubits/quiz_cubit/quiz_cubit.dart';
+import 'presentation/cubits/quiz_cubit/quiz_state.dart';
 import 'presentation/cubits/game_cubit/game_cubit.dart';
 
 void main() async {
@@ -37,7 +38,10 @@ void main() async {
       quizCubit.setContext(roomCubit.myPlayerId!, roomCubit.state.code);
     }
     final snapshot = roomCubit.consumePendingSnapshot();
-    if (snapshot != null) {
+    // Prevent stale snapshot re-bootstrap from overriding active reveal/question UI.
+    final canBootstrap =
+        quizCubit.state is! QuizQuestion && quizCubit.state is! QuizReveal;
+    if (snapshot != null && canBootstrap) {
       quizCubit.bootstrapFromSnapshot(snapshot);
     }
   });

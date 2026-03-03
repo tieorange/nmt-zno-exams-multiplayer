@@ -38,7 +38,7 @@ class SupabaseService {
   /// Builds a standard broadcast callback: unwraps the nested payload if present,
   /// logs at debug + info level, runs an optional [sideEffect] (e.g. security checks),
   /// and emits the event onto the shared stream.
-  void Function(Map<String, dynamic>) _buildCallback(
+  void Function(dynamic) _buildCallback(
     String roomCode,
     RealtimeEventType eventType,
     String eventName, {
@@ -46,14 +46,20 @@ class SupabaseService {
     void Function(Map<String, dynamic>)? sideEffect,
   }) {
     return (raw) {
-      final p = raw.containsKey('payload')
-          ? raw['payload'] as Map<String, dynamic>
-          : raw;
-      logger.d('[SupabaseService] RAW $eventName | raw:\n$raw');
+      final rawMap =
+          raw is Map
+              ? Map<String, dynamic>.from(raw as Map)
+              : <String, dynamic>{'raw': raw};
+
+      final payload = rawMap['payload'];
+      final p =
+          payload is Map ? Map<String, dynamic>.from(payload as Map) : rawMap;
+
+      logger.d('[SupabaseService] RAW $eventName | raw:\n$rawMap');
       sideEffect?.call(p);
       final extraLog = extra != null ? ' ${extra(p)}' : '';
       logger.i(
-        '[SupabaseService] recv $eventName | roomCode=$roomCode$extraLog rawKeys=${raw.keys.toList()}',
+        '[SupabaseService] recv $eventName | roomCode=$roomCode$extraLog rawKeys=${rawMap.keys.toList()}',
       );
       _emit(eventType, p);
     };
@@ -102,7 +108,11 @@ class SupabaseService {
         )
         .onBroadcast(
           event: 'round:update',
-          callback: _buildCallback(roomCode, RealtimeEventType.roundUpdate, 'round:update'),
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.roundUpdate,
+            'round:update',
+          ),
         )
         .onBroadcast(
           event: 'round:reveal',
@@ -115,7 +125,11 @@ class SupabaseService {
         )
         .onBroadcast(
           event: 'game:end',
-          callback: _buildCallback(roomCode, RealtimeEventType.gameEnd, 'game:end'),
+          callback: _buildCallback(
+            roomCode,
+            RealtimeEventType.gameEnd,
+            'game:end',
+          ),
         )
         .onBroadcast(
           event: 'player:disconnected',

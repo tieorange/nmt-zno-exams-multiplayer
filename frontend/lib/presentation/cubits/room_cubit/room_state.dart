@@ -10,6 +10,7 @@ class RoomState extends Equatable {
   final int maxPlayers;
   final List<PlayerModel> players;
   final String? errorMessage;
+  final bool isStartingGame;
 
   // Sentinel value to detect if errorMessage was explicitly passed
   static const _errorMessageUnset = Object();
@@ -21,6 +22,7 @@ class RoomState extends Equatable {
     this.maxPlayers = 4,
     this.players = const [],
     this.errorMessage,
+    this.isStartingGame = false,
   });
 
   RoomState copyWith({
@@ -30,15 +32,18 @@ class RoomState extends Equatable {
     int? maxPlayers,
     List<PlayerModel>? players,
     Object? errorMessage = _errorMessageUnset,
+    bool? isStartingGame,
   }) => RoomState(
     code: code ?? this.code,
     subject: subject ?? this.subject,
     status: status ?? this.status,
     maxPlayers: maxPlayers ?? this.maxPlayers,
     players: players ?? this.players,
-    errorMessage: identical(errorMessage, _errorMessageUnset)
-        ? this.errorMessage
-        : errorMessage as String?,
+    errorMessage:
+        identical(errorMessage, _errorMessageUnset)
+            ? this.errorMessage
+            : errorMessage as String?,
+    isStartingGame: isStartingGame ?? this.isStartingGame,
   );
 
   @override
@@ -49,5 +54,6 @@ class RoomState extends Equatable {
     maxPlayers,
     players,
     errorMessage,
+    isStartingGame,
   ];
 }
