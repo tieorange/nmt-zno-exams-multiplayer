@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
-import 'package:logger/logger.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'config/router.dart';
+import 'core/app_logger.dart';
 import 'services/supabase_service.dart';
 import 'services/api_service.dart';
 import 'presentation/cubits/room_cubit/room_cubit.dart';
@@ -16,7 +16,7 @@ void main() async {
   // Initialize Supabase (reads SUPABASE_URL + SUPABASE_ANON_KEY from --dart-define)
   await SupabaseService.initialize();
 
-  final logger = Logger();
+  final logger = createAppLogger();
   final supabaseService = SupabaseService(logger: logger);
   final apiService = ApiService(logger: logger);
 

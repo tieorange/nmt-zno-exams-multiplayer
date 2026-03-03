@@ -63,9 +63,15 @@ class QuizCubit extends Cubit<QuizState> {
         remaining = Duration(milliseconds: _timerMs);
       }
 
-      logger.i(
-        '[QuizCubit] bootstrapFromSnapshot | questionId=${_currentQuestion!.id} index=$_questionIndex/$_totalQuestions remainingMs=${remaining.inMilliseconds}',
-      );
+      logger.i({
+        'feature': 'QuizCubit',
+        'event': 'quiz.bootstrap.from_snapshot',
+        'questionId': _currentQuestion!.id,
+        'questionIndex': _questionIndex,
+        'totalQuestions': _totalQuestions,
+        'remainingMs': remaining.inMilliseconds,
+        'roomCode': _roomCode,
+      });
       emit(
         QuizQuestion(
           question: _currentQuestion!,
@@ -76,8 +82,14 @@ class QuizCubit extends Cubit<QuizState> {
         ),
       );
       _startTimer(remaining);
-    } catch (e) {
-      logger.e('[QuizCubit] bootstrapFromSnapshot failed | err=$e');
+    } catch (e, st) {
+      logger.e({
+        'feature': 'QuizCubit',
+        'event': 'quiz.bootstrap.failed',
+        'roomCode': _roomCode,
+        'currentState': state.runtimeType.toString(),
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
     }
   }
 
@@ -114,9 +126,13 @@ class QuizCubit extends Cubit<QuizState> {
         _questionIndex = 0;
         // Bug 8 fix: read timer duration from server so we stay in sync with ROUND_TIMER_MS
         _timerMs = event.data['timerMs'] as int? ?? (5 * 60 * 1000);
-        logger.i(
-          '[QuizCubit] game:start received | totalQuestions=$_totalQuestions timerMs=$_timerMs',
-        );
+        logger.i({
+          'feature': 'QuizCubit',
+          'event': 'game.start.received',
+          'roomCode': _roomCode,
+          'totalQuestions': _totalQuestions,
+          'timerMs': _timerMs,
+        });
         break;
       case RealtimeEventType.questionNew:
         _handleNewQuestion(event.data);
@@ -150,9 +166,16 @@ class QuizCubit extends Cubit<QuizState> {
     _questionIndex++;
     try {
       _currentQuestion = ClientQuestion.fromJson(data);
-      logger.i(
-        '[QuizCubit] question:new received | questionId=${_currentQuestion!.id} choicesCount=${_currentQuestion!.choices.length} timerMs=$_timerMs',
-      );
+      logger.i({
+        'feature': 'QuizCubit',
+        'event': 'question.new.received',
+        'roomCode': _roomCode,
+        'questionId': _currentQuestion!.id,
+        'choicesCount': _currentQuestion!.choices.length,
+        'questionIndex': _questionIndex,
+        'totalQuestions': _totalQuestions,
+        'timerMs': _timerMs,
+      });
 
       emit(
         QuizQuestion(
@@ -165,12 +188,15 @@ class QuizCubit extends Cubit<QuizState> {
       );
       _startTimer();
     } catch (e, st) {
-      logger.e(
-        '[QuizCubit] Failed to parse question:new data',
-        error: e,
-        stackTrace: st,
-      );
-      logger.e('[QuizCubit] Faulty question data: $data');
+      logger.e({
+        'feature': 'QuizCubit',
+        'event': 'question.parse.failed',
+        'roomCode': _roomCode,
+        'questionIndex': _questionIndex,
+        'currentState': state.runtimeType.toString(),
+        'faultyDataKeys': data.keys.toList(),
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
       emit(QuizError('Failed to load question: $e'));
     }
   }
@@ -220,9 +246,16 @@ class QuizCubit extends Cubit<QuizState> {
     final myAnswer = _myPlayerId != null ? answers[_myPlayerId] : null;
     final myScoreGained = _myPlayerId != null ? scoreDeltas[_myPlayerId] : null;
 
-    logger.i(
-      '[QuizCubit] round:reveal received | correctIndex=$correctIndex myAnswer=$myAnswer isCorrect=${myAnswer == correctIndex} scoreGained=${myScoreGained ?? 0}',
-    );
+    logger.i({
+      'feature': 'QuizCubit',
+      'event': 'round.reveal.received',
+      'roomCode': _roomCode,
+      'questionIndex': _questionIndex,
+      'correctIndex': correctIndex,
+      'myAnswer': myAnswer,
+      'isCorrect': myAnswer == correctIndex,
+      'scoreGained': myScoreGained ?? 0,
+    });
     emit(
       QuizReveal(
         question: _currentQuestion!,
@@ -240,8 +273,14 @@ class QuizCubit extends Cubit<QuizState> {
     logger.i('[QuizCubit] nextQuestion | roomCode=$_roomCode');
     try {
       await apiService.nextQuestion(_roomCode!, _myPlayerId!);
-    } catch (e) {
-      logger.e('[QuizCubit] nextQuestion failed | err=$e');
+    } catch (e, st) {
+      logger.e({
+        'feature': 'QuizCubit',
+        'event': 'quiz.next_question.failed',
+        'roomCode': _roomCode,
+        'currentState': state.runtimeType.toString(),
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
     }
   }
 
@@ -261,8 +300,16 @@ class QuizCubit extends Cubit<QuizState> {
         s.question.id,
         answerIndex,
       );
-    } catch (e) {
-      logger.e('[QuizCubit] submitAnswer failed | err=$e');
+    } catch (e, st) {
+      logger.e({
+        'feature': 'QuizCubit',
+        'event': 'quiz.submit_answer.failed',
+        'roomCode': _roomCode,
+        'questionId': s.question.id,
+        'answerIndex': answerIndex,
+        'questionIndex': _questionIndex,
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
       // Revert the optimistic update so the player can try again
       emit(s.copyWith(myAnswer: null));
     }

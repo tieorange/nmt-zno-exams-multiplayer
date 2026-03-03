@@ -1,6 +1,7 @@
 import { removePlayer, getPlayers, setCreator, clearAllCreators, deleteRoom, getRoom } from '../data/repositories/RoomRepository.js';
 import { broadcastToRoom } from '../config/supabase.js';
 import { logger } from '../config/logger.js';
+import { serializeError } from '../utils/serializeError.js';
 import { clearRoom } from './NameGenerator.js';
 
 interface PlayerSession {
@@ -44,7 +45,7 @@ setInterval(() => {
     for (const [playerId, session] of pings.entries()) {
         if (now - session.lastPing > DISCONNECT_TIMEOUT_MS) {
             handlePlayerDisconnect(playerId, session.roomCode).catch(e => {
-                logger.error(`[PlayerManager] Error in handlePlayerDisconnect for ${playerId}: ${e}`);
+                logger.error({ event: 'player.disconnect.handler_error', playerId, error: serializeError(e) });
             });
         }
     }
@@ -56,7 +57,7 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
         if (sess.playerId === playerId) sessions.delete(sid);
     }
 
-    logger.info(`[PlayerManager] Player disconnected | roomCode=${roomCode} playerId=${playerId}`);
+    logger.info({ event: 'player.disconnected', roomCode, playerId });
 
     try {
         const room = await getRoom(roomCode);
@@ -78,7 +79,7 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
             // Room is empty/all offline, delete it
             await deleteRoom(roomCode);
             clearRoom(roomCode);
-            logger.info(`[PlayerManager] Room deleted due to zero online players | roomCode=${roomCode}`);
+            logger.info({ event: 'room.deleted.empty', roomCode, reason: 'zero_online_players' });
             return;
         }
 
@@ -93,7 +94,7 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
             const candidates = onlinePlayers.length > 0 ? onlinePlayers : players;
             const oldestPlayer = candidates.sort((a, b) => new Date(a.joined_at).getTime() - new Date(b.joined_at).getTime())[0];
             await setCreator(roomCode, oldestPlayer.id);
-            logger.info(`[PlayerManager] Reassigned creator | roomCode=${roomCode} newCreatorId=${oldestPlayer.id}`);
+            logger.info({ event: 'room.creator.reassigned', roomCode, newCreatorId: oldestPlayer.id });
         }
 
         // Broadcast room state update
@@ -112,7 +113,7 @@ export async function handlePlayerDisconnect(playerId: string, roomCode: string)
         await broadcastToRoom(roomCode, 'player:disconnected', { playerId });
 
     } catch (err) {
-        logger.error(`[PlayerManager] Disconnect handling failed | err=${String(err)}`);
+        logger.error({ event: 'player.disconnect.failed', roomCode, playerId, error: serializeError(err) });
     }
 }
 

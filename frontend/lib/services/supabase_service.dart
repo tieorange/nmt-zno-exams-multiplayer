@@ -48,25 +48,41 @@ class SupabaseService {
     return (raw) {
       final rawMap =
           raw is Map
-              ? Map<String, dynamic>.from(raw as Map)
+              ? Map<String, dynamic>.from(raw)
               : <String, dynamic>{'raw': raw};
 
       final payload = rawMap['payload'];
       final p =
-          payload is Map ? Map<String, dynamic>.from(payload as Map) : rawMap;
+          payload is Map ? Map<String, dynamic>.from(payload) : rawMap;
 
-      logger.d('[SupabaseService] RAW $eventName | raw:\n$rawMap');
+      logger.d({
+        'feature': 'SupabaseService',
+        'event': 'realtime.broadcast.raw',
+        'broadcastEvent': eventName,
+        'roomCode': roomCode,
+        'rawKeys': rawMap.keys.toList(),
+      });
       sideEffect?.call(p);
-      final extraLog = extra != null ? ' ${extra(p)}' : '';
-      logger.i(
-        '[SupabaseService] recv $eventName | roomCode=$roomCode$extraLog rawKeys=${rawMap.keys.toList()}',
-      );
+      final extra_ = extra != null ? extra(p) : null;
+      logger.i({
+        'feature': 'SupabaseService',
+        'event': 'realtime.broadcast.received',
+        'broadcastEvent': eventName,
+        'roomCode': roomCode,
+        'payloadKeys': p.keys.toList(),
+        if (extra_ != null) 'extra': extra_,
+      });
       _emit(eventType, p);
     };
   }
 
   void subscribeToRoom(String roomCode) {
-    logger.i('[SupabaseService] subscribing to room | roomCode=$roomCode');
+    logger.i({
+      'feature': 'SupabaseService',
+      'event': 'realtime.subscribe.start',
+      'roomCode': roomCode,
+      'hadPreviousChannel': _channel != null,
+    });
     if (_channel != null) {
       unsubscribe();
     }
@@ -99,9 +115,14 @@ class SupabaseService {
             extra: (p) => 'questionId=${p['id']}',
             sideEffect: (p) {
               if (p.containsKey('correct_answer_index')) {
-                logger.e(
-                  '[SupabaseService] SECURITY VIOLATION: correct_answer_index in question:new!',
-                );
+                logger.e({
+                  'feature': 'SupabaseService',
+                  'event': 'security.violation',
+                  'broadcastEvent': 'question:new',
+                  'roomCode': roomCode,
+                  'issue': 'correct_answer_index_leaked_to_client',
+                  'payloadKeys': p.keys.toList(),
+                });
               }
             },
           ),
@@ -142,28 +163,50 @@ class SupabaseService {
         )
         .subscribe((status, err) {
           if (status == RealtimeSubscribeStatus.subscribed) {
-            logger.i(
-              '[SupabaseService] subscribed successfully | roomCode=$roomCode',
-            );
+            logger.i({
+              'feature': 'SupabaseService',
+              'event': 'realtime.subscribe.ok',
+              'roomCode': roomCode,
+              'outcome': 'success',
+            });
           } else if (err != null) {
-            logger.e(
-              '[SupabaseService] subscription error | roomCode=$roomCode err=$err',
-            );
+            logger.e({
+              'feature': 'SupabaseService',
+              'event': 'realtime.subscribe.error',
+              'roomCode': roomCode,
+              'subscribeStatus': status.name,
+              'outcome': 'failure',
+              'error': err.toString(),
+            });
+          } else {
+            logger.d({
+              'feature': 'SupabaseService',
+              'event': 'realtime.subscribe.status',
+              'roomCode': roomCode,
+              'subscribeStatus': status.name,
+            });
           }
         });
   }
 
   void _emit(RealtimeEventType type, Map<String, dynamic> data) {
-    logger.i(
-      '[SupabaseService] event emitted | type=${type.name} keys=${data.keys.toList()}',
-    );
+    logger.d({
+      'feature': 'SupabaseService',
+      'event': 'realtime.event.emitted',
+      'eventType': type.name,
+      'payloadKeys': data.keys.toList(),
+    });
     _controller.add(RealtimeEvent(type, data));
   }
 
   void unsubscribe() {
+    logger.i({
+      'feature': 'SupabaseService',
+      'event': 'realtime.unsubscribe',
+      'hadChannel': _channel != null,
+    });
     _channel?.unsubscribe();
     _channel = null;
-    logger.i('[SupabaseService] unsubscribed');
   }
 
   void dispose() {

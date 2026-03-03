@@ -15,6 +15,7 @@ import {
 } from '../data/repositories/QuestionRepository.js';
 import { clearRoom } from './NameGenerator.js';
 import { logger } from '../config/logger.js';
+import { serializeError } from '../utils/serializeError.js';
 import { isPlayerOffline } from './PlayerManager.js';
 
 const QUESTION_COUNT = 5;
@@ -92,9 +93,7 @@ export async function restartGame(roomCode: string): Promise<void> {
 async function runGame(roomCode: string, subject: string, logLabel: string): Promise<void> {
   const questions = await getRandomQuestions(subject, QUESTION_COUNT);
   if (questions.length < QUESTION_COUNT) {
-    logger.warn(
-      `[GameEngine] Not enough questions | roomCode=${roomCode} subject=${subject} got=${questions.length} need=${QUESTION_COUNT}`,
-    );
+    logger.warn({ event: 'game.questions.insufficient', roomCode, subject, got: questions.length, need: QUESTION_COUNT });
   }
 
   // Cancel any leftover cleanup timeout (e.g. 1-hour post-game cleanup)
@@ -110,7 +109,7 @@ async function runGame(roomCode: string, subject: string, logLabel: string): Pro
     current_question_index: 0,
   });
 
-  logger.info(`[GameEngine] ${logLabel} | roomCode=${roomCode} questions=${questions.length}`);
+  logger.info({ event: 'game.run', roomCode, label: logLabel, questionCount: questions.length });
   await safeBroadcast(roomCode, 'game:start', { totalQuestions: questions.length, timerMs: ROUND_TIMER_MS });
   await startRound(roomCode, 0, questions);
 }
@@ -138,9 +137,7 @@ async function startRound(
     choices: questionDoc.choices,
   };
 
-  logger.info(
-    `[GameEngine] Round started | roomCode=${roomCode} questionIndex=${questionIndex} questionId=${questionDoc.id} choicesCount=${questionDoc.choices.length}`,
-  );
+  logger.info({ event: 'game.round.start', roomCode, questionIndex, questionId: questionDoc.id, choicesCount: questionDoc.choices.length });
 
   await safeBroadcast(roomCode, 'question:new', clientQuestion);
 
@@ -174,9 +171,7 @@ export async function submitAnswer(
 
   // Validate answerIndex is within the actual choices for this question (2–5 choices)
   if (answerIndex < 0 || answerIndex >= currentQuestion.choices.length) {
-    logger.warn(
-      `[GameEngine] Invalid answerIndex | roomCode=${roomCode} playerId=${playerId} answerIndex=${answerIndex} choicesCount=${currentQuestion.choices.length}`,
-    );
+    logger.warn({ event: 'game.answer.invalid_index', roomCode, playerId, answerIndex, choicesCount: currentQuestion.choices.length });
     throw new Error('Невірний індекс відповіді');
   }
 
@@ -188,9 +183,7 @@ export async function submitAnswer(
     : 0;
 
   state.answers.set(playerId, answerIndex);
-  logger.info(
-    `[GameEngine] Answer recv | roomCode=${roomCode} playerId=${playerId} answerIndex=${answerIndex} timeTakenMs=${timeTakenMs}`,
-  );
+  logger.info({ event: 'game.answer.received', roomCode, playerId, answerIndex, timeTakenMs });
 
   await safeBroadcast(roomCode, 'round:update', {
     playerAnswers: Object.fromEntries(state.answers),
@@ -223,9 +216,7 @@ async function revealRound(roomCode: string): Promise<void> {
     .map(([k]) => k);
 
   if (unanswered.length > 0) {
-    logger.warn(
-      `[GameEngine] Timer expired | roomCode=${roomCode} questionIndex=${questionIndex} unanswered=${JSON.stringify(unanswered)}`,
-    );
+    logger.warn({ event: 'game.round.timer_expired', roomCode, questionIndex, unansweredCount: unanswered.length, unansweredPlayerIds: unanswered });
   }
 
   // Update scores in parallel to reduce broadcast latency
@@ -274,9 +265,7 @@ async function revealRound(roomCode: string): Promise<void> {
   const freshScores: Record<string, number> = {};
   for (const p of freshPlayers) freshScores[p.id] = p.score;
 
-  logger.info(
-    `[GameEngine] Round reveal | roomCode=${roomCode} correctIndex=${correctIndex} scores=${JSON.stringify(freshScores)}`,
-  );
+  logger.info({ event: 'game.round.reveal', roomCode, questionIndex, correctIndex, answeredCount: players.length - unanswered.length, scores: freshScores });
 
   await safeBroadcast(roomCode, 'round:reveal', {
     correctIndex,
@@ -319,9 +308,7 @@ export async function nextQuestion(roomCode: string, playerId: string): Promise<
     throw new Error('Немає очікуваного наступного питання');
   }
 
-  logger.info(
-    `[GameEngine] Creator advancing to next | roomCode=${roomCode} nextIndex=${pending.nextIndex}`,
-  );
+  logger.info({ event: 'game.next_question.creator_advance', roomCode, nextIndex: pending.nextIndex });
   await advanceToNextRound(roomCode);
 }
 
@@ -339,9 +326,7 @@ async function endGame(roomCode: string): Promise<void> {
       score: p.score,
     }));
 
-  logger.info(
-    `[GameEngine] Game ended | roomCode=${roomCode} scoreboard=${JSON.stringify(scoreboard)}`,
-  );
+  logger.info({ event: 'game.end', roomCode, playerCount: scoreboard.length, scoreboard });
   await safeBroadcast(roomCode, 'game:end', { scoreboard });
 
   // Schedule room cleanup after 1 hour; store handle so we can cancel if needed
@@ -350,7 +335,7 @@ async function endGame(roomCode: string): Promise<void> {
       await deleteRoom(roomCode);
       clearRoom(roomCode);
       cleanupTimeouts.delete(roomCode);
-      logger.info(`[GameEngine] Room cleaned up | roomCode=${roomCode}`);
+      logger.info({ event: 'game.room.cleanup', roomCode });
     })();
   }, 60 * 60 * 1000);
   cleanupTimeouts.set(roomCode, handle);
@@ -361,9 +346,7 @@ async function safeBroadcast(roomCode: string, event: string, payload: unknown):
   try {
     await broadcastToRoom(roomCode, event, payload);
   } catch (err) {
-    logger.error(
-      `[GameEngine] Broadcast failed | roomCode=${roomCode} event=${event} err=${String(err)}`,
-    );
+    logger.error({ event: 'game.broadcast.failed', roomCode, broadcastEvent: event, error: serializeError(err) });
   }
 }
 

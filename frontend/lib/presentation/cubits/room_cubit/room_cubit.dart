@@ -48,9 +48,15 @@ class RoomCubit extends Cubit<RoomState> {
       myPlayerId = result['playerId'] as String;
       myName = result['name'] as String;
       myIsCreator = result['isCreator'] as bool? ?? false;
-      logger.i(
-        '[RoomCubit] joined | myPlayerId=$myPlayerId name=$myName isCreator=$myIsCreator',
-      );
+      logger.i({
+        'feature': 'RoomCubit',
+        'event': 'room.joined',
+        'roomCode': roomCode.toUpperCase(),
+        'playerId': myPlayerId,
+        'name': myName,
+        'isCreator': myIsCreator,
+        'outcome': 'success',
+      });
 
       // Immediately update local state with our player info to avoid race conditions
       // where the realtime broadcast hasn't arrived yet
@@ -97,8 +103,15 @@ class RoomCubit extends Cubit<RoomState> {
 
       // Start heartbeat — backend disconnects players after 60s of silence
       _startHeartbeat(roomCode.toUpperCase());
-    } catch (e) {
-      logger.e('[RoomCubit] joinRoom failed | err=$e');
+    } catch (e, st) {
+      logger.e({
+        'feature': 'RoomCubit',
+        'event': 'room.join.failed',
+        'roomCode': roomCode,
+        'currentStatus': state.status.name,
+        'outcome': 'failure',
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
       emit(
         state.copyWith(status: RoomStatus.error, errorMessage: e.toString()),
       );
@@ -119,24 +132,39 @@ class RoomCubit extends Cubit<RoomState> {
     if (state.status != RoomStatus.waiting) return;
     _hasStartRequest = true;
     emit(state.copyWith(isStartingGame: true, errorMessage: null));
-    logger.i('[RoomCubit] starting game | roomCode=${state.code}');
+    logger.i({
+      'feature': 'RoomCubit',
+      'event': 'game.start.attempt',
+      'roomCode': state.code,
+      'playerId': myPlayerId,
+      'playerCount': state.players.length,
+    });
     try {
       await apiService.startGame(state.code, myPlayerId!);
       await _prefetchCurrentQuestionSnapshot(state.code);
       emit(state.copyWith(status: RoomStatus.playing, isStartingGame: false));
-    } catch (e) {
+    } catch (e, st) {
       final err = e.toString();
       if (err.contains('Гра вже почалась') ||
           err.contains('game_already_started')) {
-        logger.w(
-          '[RoomCubit] startGame already started on backend | roomCode=${state.code}',
-        );
+        logger.w({
+          'feature': 'RoomCubit',
+          'event': 'game.start.already_started',
+          'roomCode': state.code,
+        });
         await _prefetchCurrentQuestionSnapshot(state.code);
         emit(state.copyWith(status: RoomStatus.playing, isStartingGame: false));
         return;
       }
       _hasStartRequest = false;
-      logger.e('[RoomCubit] startGame failed | err=$e');
+      logger.e({
+        'feature': 'RoomCubit',
+        'event': 'game.start.failed',
+        'roomCode': state.code,
+        'currentStatus': state.status.name,
+        'outcome': 'failure',
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
       emit(
         state.copyWith(
           status: RoomStatus.error,
@@ -249,9 +277,13 @@ class RoomCubit extends Cubit<RoomState> {
         _hasStartRequest = false;
       }
 
-      logger.i(
-        '[RoomCubit] syncRoomState | roomCode=${state.code} status=$statusStr players=${players.length}',
-      );
+      logger.i({
+        'feature': 'RoomCubit',
+        'event': 'room.sync',
+        'roomCode': state.code,
+        'roomStatus': statusStr,
+        'playerCount': players.length,
+      });
       emit(
         state.copyWith(
           code: room['code'] as String? ?? state.code,
@@ -263,10 +295,14 @@ class RoomCubit extends Cubit<RoomState> {
               status == RoomStatus.waiting ? false : state.isStartingGame,
         ),
       );
-    } catch (e) {
-      logger.w(
-        '[RoomCubit] syncRoomState failed | roomCode=${state.code} err=$e',
-      );
+    } catch (e, st) {
+      logger.w({
+        'feature': 'RoomCubit',
+        'event': 'room.sync.failed',
+        'roomCode': state.code,
+        'currentStatus': state.status.name,
+        'error': e.toString(),
+      }, error: e, stackTrace: st);
     }
   }
 
