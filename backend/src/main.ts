@@ -25,11 +25,7 @@ const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 const corsOrigin = process.env.CORS_ORIGIN;
 
-// Development defaults (only if CORS_ORIGIN is not set).
-// Port 5000 is the pinned Flutter web port used by `make frontend`.
-const developmentOrigins = ['http://localhost:3000', 'http://localhost:4200', 'http://localhost:5000'];
-
-let allowedOrigin: string | string[];
+let allowedOrigin: cors.CorsOptions['origin'];
 
 if (corsOrigin) {
     // If explicitly configured, use it
@@ -41,8 +37,10 @@ if (corsOrigin) {
         'Please set CORS_ORIGIN to your frontend URL (e.g., https://your-app.vercel.app)'
     );
 } else {
-    // In development, allow common localhost ports
-    allowedOrigin = developmentOrigins;
+    // In development, allow any origin.
+    // This covers localhost on all ports (make frontend uses 5000, make iphone uses 8080)
+    // and LAN IPs (192.168.x.x) for iPhone/mobile device testing via `make iphone`.
+    allowedOrigin = true;
 }
 
 app.use(cors({ origin: allowedOrigin }));

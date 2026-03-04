@@ -13,7 +13,7 @@ import { CreateRoomSchema, JoinRoomSchema, HeartbeatSchema } from '../validators
 import { registerPlayerSession, registerPingOnly, getPlayerBySession, pingHeartbeat } from '../../services/PlayerManager.js';
 import { logger } from '../../config/logger.js';
 import { serializeError } from '../../utils/serializeError.js';
-import { getCurrentClientQuestion } from '../../services/GameEngine.js';
+import { getCurrentClientQuestion, getActivePlayerAnswers, getPendingRevealData } from '../../services/GameEngine.js';
 
 /**
  * Validates that a player belongs to a room by checking the database.
@@ -78,6 +78,13 @@ export async function getRoomState(req: Request, res: Response) {
       isCreator: p.is_creator,
     })),
   });
+}
+
+export async function getRoundState(req: Request, res: Response) {
+  const code = String(req.params.code).toUpperCase();
+  const playerAnswers = getActivePlayerAnswers(code);
+  const pendingReveal = getPendingRevealData(code);
+  res.json({ playerAnswers, pendingReveal });
 }
 
 export async function joinRoom(req: Request, res: Response) {

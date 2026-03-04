@@ -1,3 +1,4 @@
+import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -17,6 +18,35 @@ void main() async {
   await SupabaseService.initialize();
 
   final logger = createAppLogger();
+
+  // Route Flutter framework errors (overflow, layout, etc.) through structured logger
+  // AND debugPrint so they always appear in the terminal ([FE] prefix via concurrently).
+  FlutterError.onError = (FlutterErrorDetails details) {
+    final msg = details.exceptionAsString();
+    final ctx = details.context?.toString() ?? '';
+    debugPrint('[FlutterError] $msg${ctx.isNotEmpty ? ' ($ctx)' : ''}');
+    logger.e(
+      {'feature': 'FlutterError', 'event': 'flutter.framework.error', 'error': msg, 'context': ctx},
+      error: details.exception,
+      stackTrace: details.stack,
+    );
+  };
+
+  // Catch async errors not handled by Flutter framework (e.g. in isolates, platform callbacks).
+  PlatformDispatcher.instance.onError = (error, stack) {
+    debugPrint('[PlatformError] $error');
+    logger.e(
+      {
+        'feature': 'PlatformDispatcher',
+        'event': 'platform.unhandled.error',
+        'error': error.toString(),
+      },
+      error: error,
+      stackTrace: stack,
+    );
+    return true;
+  };
+
   final supabaseService = SupabaseService(logger: logger);
   final apiService = ApiService(logger: logger);
 
@@ -39,8 +69,7 @@ void main() async {
     }
     final snapshot = roomCubit.consumePendingSnapshot();
     // Prevent stale snapshot re-bootstrap from overriding active reveal/question UI.
-    final canBootstrap =
-        quizCubit.state is! QuizQuestion && quizCubit.state is! QuizReveal;
+    final canBootstrap = quizCubit.state is! QuizQuestion && quizCubit.state is! QuizReveal;
     if (snapshot != null && canBootstrap) {
       quizCubit.bootstrapFromSnapshot(snapshot);
     }
@@ -77,9 +106,7 @@ class NmtQuizApp extends StatelessWidget {
         scaffoldBackgroundColor: const Color(0xFF0D1117),
         cardTheme: CardThemeData(
           color: const Color(0xFF161B22),
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16),
-          ),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           elevation: 0,
         ),
       ),

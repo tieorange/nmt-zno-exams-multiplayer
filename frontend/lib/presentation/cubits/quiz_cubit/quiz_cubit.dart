@@ -12,6 +12,7 @@ class QuizCubit extends Cubit<QuizState> {
   final Logger logger;
   late StreamSubscription<RealtimeEvent> _sub;
   Timer? _timer;
+  Timer? _pollTimer;
   ClientQuestion? _currentQuestion;
   String? _myPlayerId;
   String? _roomCode;
@@ -20,17 +21,29 @@ class QuizCubit extends Cubit<QuizState> {
   // Bug 8 fix: driven by game:start payload (timerMs) instead of hardcoded 5 min
   int _timerMs = 5 * 60 * 1000;
 
-  QuizCubit({
-    required this.supabaseService,
-    required this.apiService,
-    required this.logger,
-  }) : super(const QuizInitial()) {
+  QuizCubit({required this.supabaseService, required this.apiService, required this.logger})
+    : super(const QuizInitial()) {
     _sub = supabaseService.events.listen(_handleEvent);
   }
 
   void setContext(String myPlayerId, String roomCode) {
     _myPlayerId = myPlayerId;
     _roomCode = roomCode;
+  }
+
+  /// Starts a 2-second polling fallback that fetches round state via REST.
+  /// This catches missed Supabase Realtime events (e.g. on LAN via `make iphone`).
+  /// Safe to call multiple times — cancels any existing poll timer first.
+  void startPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      _pollRoundState();
+    });
+  }
+
+  void _stopPolling() {
+    _pollTimer?.cancel();
+    _pollTimer = null;
   }
 
   /// Bootstrap quiz state from a server snapshot on rejoin.
@@ -54,10 +67,7 @@ class QuizCubit extends Cubit<QuizState> {
       if (roundStartedAtStr != null) {
         final roundStartedAt = DateTime.parse(roundStartedAtStr);
         final elapsed = DateTime.now().difference(roundStartedAt);
-        final remainingMs = (_timerMs - elapsed.inMilliseconds).clamp(
-          0,
-          _timerMs,
-        );
+        final remainingMs = (_timerMs - elapsed.inMilliseconds).clamp(0, _timerMs);
         remaining = Duration(milliseconds: remainingMs);
       } else {
         remaining = Duration(milliseconds: _timerMs);
@@ -83,13 +93,17 @@ class QuizCubit extends Cubit<QuizState> {
       );
       _startTimer(remaining);
     } catch (e, st) {
-      logger.e({
-        'feature': 'QuizCubit',
-        'event': 'quiz.bootstrap.failed',
-        'roomCode': _roomCode,
-        'currentState': state.runtimeType.toString(),
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': 'QuizCubit',
+          'event': 'quiz.bootstrap.failed',
+          'roomCode': _roomCode,
+          'currentState': state.runtimeType.toString(),
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
@@ -102,9 +116,7 @@ class QuizCubit extends Cubit<QuizState> {
       final room = await apiService.getRoomState(roomCode);
       final snapshot = room['currentQuestion'] as Map<String, dynamic>?;
       if (snapshot == null) {
-        logger.w(
-          '[QuizCubit] recoverFromRoomSnapshot | no currentQuestion roomCode=$roomCode',
-        );
+        logger.w('[QuizCubit] recoverFromRoomSnapshot | no currentQuestion roomCode=$roomCode');
         return;
       }
       logger.i(
@@ -112,9 +124,7 @@ class QuizCubit extends Cubit<QuizState> {
       );
       bootstrapFromSnapshot(snapshot);
     } catch (e) {
-      logger.w(
-        '[QuizCubit] recoverFromRoomSnapshot failed | roomCode=$roomCode err=$e',
-      );
+      logger.w('[QuizCubit] recoverFromRoomSnapshot failed | roomCode=$roomCode err=$e');
     }
   }
 
@@ -144,15 +154,11 @@ class QuizCubit extends Cubit<QuizState> {
         _handleReveal(event.data);
         break;
       case RealtimeEventType.gameEnd:
-        logger.i(
-          '[QuizCubit] game ended | scoreboard=${event.data['scoreboard']}',
-        );
+        logger.i('[QuizCubit] game ended | scoreboard=${event.data['scoreboard']}');
         _timer?.cancel();
         emit(
           QuizGameEnded(
-            scoreboard: List<Map<String, dynamic>>.from(
-              event.data['scoreboard'] as List,
-            ),
+            scoreboard: List<Map<String, dynamic>>.from(event.data['scoreboard'] as List),
           ),
         );
         break;
@@ -163,6 +169,7 @@ class QuizCubit extends Cubit<QuizState> {
   }
 
   void _handleNewQuestion(Map<String, dynamic> data) {
+    _stopPolling(); // Cancel any reveal-state poll when realtime delivers question:new
     _questionIndex++;
     try {
       _currentQuestion = ClientQuestion.fromJson(data);
@@ -188,15 +195,19 @@ class QuizCubit extends Cubit<QuizState> {
       );
       _startTimer();
     } catch (e, st) {
-      logger.e({
-        'feature': 'QuizCubit',
-        'event': 'question.parse.failed',
-        'roomCode': _roomCode,
-        'questionIndex': _questionIndex,
-        'currentState': state.runtimeType.toString(),
-        'faultyDataKeys': data.keys.toList(),
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': 'QuizCubit',
+          'event': 'question.parse.failed',
+          'roomCode': _roomCode,
+          'questionIndex': _questionIndex,
+          'currentState': state.runtimeType.toString(),
+          'faultyDataKeys': data.keys.toList(),
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
       emit(QuizError('Failed to load question: $e'));
     }
   }
@@ -218,21 +229,98 @@ class QuizCubit extends Cubit<QuizState> {
   void _handleRoundUpdate(Map<String, dynamic> data) {
     final raw = data['playerAnswers'] as Map<String, dynamic>? ?? {};
     final answers = raw.map((k, v) => MapEntry(k, v as int?));
-    logger.i(
-      '[QuizCubit] round:update received | answeredPlayers=${answers.length}',
-    );
+    logger.i('[QuizCubit] round:update received | answeredPlayers=${answers.length}');
     final s = state;
     if (s is QuizQuestion) emit(s.copyWith(playerAnswers: answers));
   }
 
+  /// Polling fallback: fetch round state from REST and apply any missed events.
+  /// Handles two scenarios:
+  ///   1. QuizQuestion state  → apply missed round:update / round:reveal
+  ///   2. QuizReveal state    → detect when creator presses “Next Question” and
+  ///                            bootstrap the new question (missed question:new)
+  Future<void> _pollRoundState() async {
+    if (_roomCode == null) return;
+    final s = state;
+
+    // SCENARIO 2: Stuck on reveal screen — poll for next question
+    if (s is QuizReveal) {
+      await _pollForNextQuestion(s.question.id);
+      return;
+    }
+
+    // Stop for any other non-question state (loading, error, game ended)
+    if (s is! QuizQuestion) {
+      _stopPolling();
+      return;
+    }
+    try {
+      final data = await apiService.getRoundState(_roomCode!);
+
+      // If pendingReveal is present, the round has been revealed — trigger reveal
+      final pendingReveal = data['pendingReveal'] as Map<String, dynamic>?;
+      if (pendingReveal != null) {
+        logger.i('[QuizCubit] poll detected pendingReveal | roomCode=$_roomCode');
+        _stopPolling();
+        _handleReveal(pendingReveal);
+        return;
+      }
+
+      // Apply live playerAnswers update (for chip animations)
+      final rawAnswers = data['playerAnswers'];
+      if (rawAnswers is Map) {
+        final answers = rawAnswers.map((k, v) => MapEntry(k.toString(), v as int?));
+        final currentS = state;
+        if (currentS is QuizQuestion &&
+            answers.isNotEmpty &&
+            !_mapsEqual(answers, currentS.playerAnswers)) {
+          logger.i(
+            '[QuizCubit] poll applied round:update | answeredCount=${answers.values.where((v) => v != null).length}',
+          );
+          emit(currentS.copyWith(playerAnswers: answers));
+        }
+      }
+    } catch (e) {
+      // Polling errors are silent — network blips should not crash the app
+      logger.d('[QuizCubit] _pollRoundState error (silent) | $e');
+    }
+  }
+
+  bool _mapsEqual(Map<String, int?> a, Map<String, int?> b) {
+    if (a.length != b.length) return false;
+    for (final k in a.keys) {
+      if (a[k] != b[k]) return false;
+    }
+    return true;
+  }
+
+  /// Polls GET /rooms/:code to detect when the creator advances to the next
+  /// question (missed question:new broadcast). Bootstraps from snapshot if so.
+  Future<void> _pollForNextQuestion(String revealedQuestionId) async {
+    if (_roomCode == null) return;
+    try {
+      final room = await apiService.getRoomState(_roomCode!);
+      final snapshot = room['currentQuestion'] as Map<String, dynamic>?;
+      if (snapshot == null) return;
+      final newQId = snapshot['id'] as String?;
+      if (newQId != null && newQId != revealedQuestionId) {
+        logger.i('[QuizCubit] poll detected new question | old=$revealedQuestionId new=$newQId');
+        _stopPolling();
+        bootstrapFromSnapshot(snapshot); // emits QuizQuestion
+        startPolling(); // start round polling for new question
+      }
+    } catch (e) {
+      logger.d('[QuizCubit] _pollForNextQuestion error (silent) | $e');
+    }
+  }
+
   void _handleReveal(Map<String, dynamic> data) {
     _timer?.cancel();
+    _stopPolling(); // Stop polling once reveal is handled
 
     // Guard: if we missed question:new, we can't show the reveal properly
     if (_currentQuestion == null) {
-      logger.w(
-        '[QuizCubit] round:reveal received but _currentQuestion is null - ignoring',
-      );
+      logger.w('[QuizCubit] round:reveal received but _currentQuestion is null - ignoring');
       return;
     }
 
@@ -240,9 +328,7 @@ class QuizCubit extends Cubit<QuizState> {
     final raw = data['playerAnswers'] as Map<String, dynamic>? ?? {};
     final answers = raw.map((k, v) => MapEntry(k, v as int?));
     final scores = Map<String, int>.from(data['scores'] as Map);
-    final scoreDeltas = Map<String, int>.from(
-      data['scoreDeltas'] as Map? ?? {},
-    );
+    final scoreDeltas = Map<String, int>.from(data['scoreDeltas'] as Map? ?? {});
     final myAnswer = _myPlayerId != null ? answers[_myPlayerId] : null;
     final myScoreGained = _myPlayerId != null ? scoreDeltas[_myPlayerId] : null;
 
@@ -274,13 +360,17 @@ class QuizCubit extends Cubit<QuizState> {
     try {
       await apiService.nextQuestion(_roomCode!, _myPlayerId!);
     } catch (e, st) {
-      logger.e({
-        'feature': 'QuizCubit',
-        'event': 'quiz.next_question.failed',
-        'roomCode': _roomCode,
-        'currentState': state.runtimeType.toString(),
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': 'QuizCubit',
+          'event': 'quiz.next_question.failed',
+          'roomCode': _roomCode,
+          'currentState': state.runtimeType.toString(),
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
@@ -294,22 +384,21 @@ class QuizCubit extends Cubit<QuizState> {
     emit(s.copyWith(myAnswer: answerIndex));
     try {
       // Bug 12 fix: wrap in try/catch and revert optimistic update on failure
-      await apiService.submitAnswer(
-        _roomCode!,
-        _myPlayerId!,
-        s.question.id,
-        answerIndex,
-      );
+      await apiService.submitAnswer(_roomCode!, _myPlayerId!, s.question.id, answerIndex);
     } catch (e, st) {
-      logger.e({
-        'feature': 'QuizCubit',
-        'event': 'quiz.submit_answer.failed',
-        'roomCode': _roomCode,
-        'questionId': s.question.id,
-        'answerIndex': answerIndex,
-        'questionIndex': _questionIndex,
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': 'QuizCubit',
+          'event': 'quiz.submit_answer.failed',
+          'roomCode': _roomCode,
+          'questionId': s.question.id,
+          'answerIndex': answerIndex,
+          'questionIndex': _questionIndex,
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
       // Revert the optimistic update so the player can try again
       emit(s.copyWith(myAnswer: null));
     }
@@ -320,6 +409,7 @@ class QuizCubit extends Cubit<QuizState> {
     logger.i('[QuizCubit] closing');
     _sub.cancel();
     _timer?.cancel();
+    _stopPolling();
     return super.close();
   }
 }

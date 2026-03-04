@@ -2,7 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import { getSubjects } from '../controllers/SubjectController.js';
 import { startGame, submitAnswer, restartGame, nextQuestion } from '../controllers/GameController.js';
-import { createRoom, getRoomState, joinRoom, heartbeat } from '../controllers/RoomController.js';
+import { createRoom, getRoomState, getRoundState, joinRoom, heartbeat } from '../controllers/RoomController.js';
 
 const router = Router();
 
@@ -36,5 +36,6 @@ router.post('/rooms/:code/answer', validateRoomCode, asyncHandler(submitAnswer))
 router.post('/rooms/:code/heartbeat', validateRoomCode, asyncHandler(heartbeat));
 router.post('/rooms/:code/restart', validateRoomCode, asyncHandler(restartGame));
 router.post('/rooms/:code/next-question', validateRoomCode, asyncHandler(nextQuestion));
+router.get('/rooms/:code/round-state', validateRoomCode, asyncHandler(getRoundState));
 
 export default router;

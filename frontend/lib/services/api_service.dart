@@ -56,16 +56,20 @@ class ApiService {
       return result;
     } catch (e, st) {
       final durationMs = DateTime.now().difference(start).inMilliseconds;
-      logger.e({
-        'feature': feature,
-        'event': 'api.request.failed',
-        'requestId': requestId,
-        'method': method,
-        'endpoint': endpoint,
-        'durationMs': durationMs,
-        'outcome': 'failure',
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': feature,
+          'event': 'api.request.failed',
+          'requestId': requestId,
+          'method': method,
+          'endpoint': endpoint,
+          'durationMs': durationMs,
+          'outcome': 'failure',
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
       rethrow;
     }
   }
@@ -116,12 +120,7 @@ class ApiService {
     });
   }
 
-  Future<void> submitAnswer(
-    String roomCode,
-    String playerId,
-    String questionId,
-    int answerIndex,
-  ) {
+  Future<void> submitAnswer(String roomCode, String playerId, String questionId, int answerIndex) {
     final endpoint = '/api/rooms/${roomCode.toUpperCase()}/answer';
     return _traced('ApiService', 'POST', endpoint, (_) async {
       final res = await http.post(
@@ -186,6 +185,21 @@ class ApiService {
       }
       return jsonDecode(res.body) as Map<String, dynamic>;
       // Returns: { code, subject, status, maxPlayers, currentQuestionIndex, currentQuestion?, players[] }
+    });
+  }
+
+  /// Returns live round state: playerAnswers (map playerId→answerIndex|null) and
+  /// pendingReveal (null while round is active; reveal payload once all answered).
+  /// Used as a polling fallback when Supabase Realtime events are not delivered (e.g. LAN).
+  Future<Map<String, dynamic>> getRoundState(String roomCode) {
+    final endpoint = '/api/rooms/${roomCode.toUpperCase()}/round-state';
+    return _traced('ApiService', 'GET', endpoint, (_) async {
+      final res = await http.get(Uri.parse('$baseUrl$endpoint'));
+      if (res.statusCode != 200) {
+        throw Exception('getRoundState failed (${res.statusCode}): ${res.body}');
+      }
+      return jsonDecode(res.body) as Map<String, dynamic>;
+      // Returns: { playerAnswers: {id: index|null, ...} | null, pendingReveal: {...} | null }
     });
   }
 

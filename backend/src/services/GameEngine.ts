@@ -49,6 +49,16 @@ const roundState = new Map<string, RoundState>();
 // In-memory: roomCode → pending next-round state (between reveal and creator pressing next)
 const pendingNextRound = new Map<string, PendingNextRound>();
 
+// Cache of reveal data so polling clients can catch a missed round:reveal broadcast.
+// Populated by revealRound(), cleared by advanceToNextRound().
+interface RevealCache {
+  correctIndex: number;
+  playerAnswers: Record<string, number | null>;
+  scores: Record<string, number>;
+  scoreDeltas: Record<string, number>;
+}
+const pendingRevealCache = new Map<string, RevealCache>();
+
 // Track cleanup timeouts so we can cancel if a room gets reused
 const cleanupTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
@@ -267,12 +277,17 @@ async function revealRound(roomCode: string): Promise<void> {
 
   logger.info({ event: 'game.round.reveal', roomCode, questionIndex, correctIndex, answeredCount: players.length - unanswered.length, scores: freshScores });
 
-  await safeBroadcast(roomCode, 'round:reveal', {
+  const revealPayload = {
     correctIndex,
     playerAnswers: Object.fromEntries(state.answers),
     scores: freshScores,
     scoreDeltas,
-  });
+  };
+
+  // Cache reveal data for polls (clients that missed the WebSocket broadcast)
+  pendingRevealCache.set(roomCode, revealPayload);
+
+  await safeBroadcast(roomCode, 'round:reveal', revealPayload);
 
   // Store pending state so creator can manually advance with nextQuestion().
   // Safety fallback fires automatically in case creator disconnects.
@@ -286,6 +301,7 @@ async function revealRound(roomCode: string): Promise<void> {
 async function advanceToNextRound(roomCode: string): Promise<void> {
   const pending = pendingNextRound.get(roomCode);
   if (!pending) return; // Already advanced (creator pressed button or fallback already ran)
+  pendingRevealCache.delete(roomCode); // Clear reveal cache — new round starting
   pendingNextRound.delete(roomCode);
   clearTimeout(pending.fallbackTimer);
 
@@ -373,6 +389,27 @@ export function getCurrentClientQuestion(roomCode: string) {
     roundStartedAt: state.roundStartedAt,
     timerMs: ROUND_TIMER_MS,
   };
+}
+
+/**
+ * Returns the current live player answers for an active round.
+ * Returns null if no round is in progress (between rounds or game not started).
+ * Used by the polling REST endpoint so clients can update answer chips.
+ */
+export function getActivePlayerAnswers(roomCode: string): Record<string, number | null> | null {
+  const state = roundState.get(roomCode);
+  if (!state) return null;
+  return Object.fromEntries(state.answers);
+}
+
+/**
+ * Returns the cached reveal payload if a round was revealed but the next question hasn't
+ * started yet (i.e. creator hasn't pressed "Next question").
+ * Returns null otherwise.
+ * Used by the polling REST endpoint so clients that missed round:reveal can catch up.
+ */
+export function getPendingRevealData(roomCode: string): RevealCache | null {
+  return pendingRevealCache.get(roomCode) ?? null;
 }
 
 /**
