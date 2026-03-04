@@ -1,18 +1,21 @@
 import 'dotenv/config';
 import './config/supabase.js';  // validates env vars + initializes client on import
-import express from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { logger } from './config/logger.js';
+import { serializeError } from './utils/serializeError.js';
+import { requestIdMiddleware } from './middleware/requestId.js';
+import { requestLoggerMiddleware } from './middleware/requestLogger.js';
 import routes from './presentation/routes/index.js';
 
 process.on('unhandledRejection', (reason) => {
-    logger.error(`[Unhandled Rejection] ${reason}`);
+    logger.error({ event: 'process.unhandledRejection', error: serializeError(reason) });
     process.exit(1);
 });
 
 process.on('uncaughtException', (err) => {
-    logger.error(`[Uncaught Exception] ${err}`);
+    logger.error({ event: 'process.uncaughtException', error: serializeError(err) });
     process.exit(1);
 });
 
@@ -22,10 +25,7 @@ const app = express();
 const isProduction = process.env.NODE_ENV === 'production';
 const corsOrigin = process.env.CORS_ORIGIN;
 
-// Development defaults (only if CORS_ORIGIN is not set)
-const developmentOrigins = ['http://localhost:3000', 'http://localhost:4200'];
-
-let allowedOrigin: string | string[];
+let allowedOrigin: cors.CorsOptions['origin'];
 
 if (corsOrigin) {
     // If explicitly configured, use it
@@ -37,14 +37,35 @@ if (corsOrigin) {
         'Please set CORS_ORIGIN to your frontend URL (e.g., https://your-app.vercel.app)'
     );
 } else {
-    // In development, allow common localhost ports
-    allowedOrigin = developmentOrigins;
+    // In development, allow any origin.
+    // This covers localhost on all ports (make frontend uses 5000, make iphone uses 8080)
+    // and LAN IPs (192.168.x.x) for iPhone/mobile device testing via `make iphone`.
+    allowedOrigin = true;
 }
 
 app.use(cors({ origin: allowedOrigin }));
 app.use(helmet());
 app.use(express.json());
+// Attach requestId first so all subsequent logs can reference it
+app.use(requestIdMiddleware);
+app.use(requestLoggerMiddleware);
 app.use('/api', routes);
 
+// Global error middleware — must have 4 parameters so Express recognises it as an error handler.
+// Returns a stable { error } JSON shape for all /api/* failures.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use('/api', (err: unknown, req: Request, res: Response, _next: NextFunction) => {
+    const requestId = res.locals['requestId'] as string | undefined;
+    logger.error({
+        event: 'http.error.unhandled',
+        requestId,
+        method: req.method,
+        path: req.path,
+        error: serializeError(err),
+    });
+    // Don't leak stack traces to the client in production
+    res.status(500).json({ error: 'Internal server error' });
+});
+
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => logger.info(`[Server] Listening on port ${PORT}`));
+app.listen(PORT, () => logger.info({ event: 'server.start', port: PORT }));

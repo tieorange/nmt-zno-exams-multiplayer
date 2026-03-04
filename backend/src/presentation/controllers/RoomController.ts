@@ -12,7 +12,8 @@ import { broadcastToRoom } from '../../config/supabase.js';
 import { CreateRoomSchema, JoinRoomSchema, HeartbeatSchema } from '../validators/requestSchemas.js';
 import { registerPlayerSession, registerPingOnly, getPlayerBySession, pingHeartbeat } from '../../services/PlayerManager.js';
 import { logger } from '../../config/logger.js';
-import { getCurrentClientQuestion } from '../../services/GameEngine.js';
+import { serializeError } from '../../utils/serializeError.js';
+import { getCurrentClientQuestion, getActivePlayerAnswers, getPendingRevealData } from '../../services/GameEngine.js';
 
 /**
  * Validates that a player belongs to a room by checking the database.
@@ -24,12 +25,13 @@ export async function validatePlayerInRoom(roomCode: string, playerId: string): 
     const players = await getPlayers(roomCode);
     return players.some(p => p.id === playerId);
   } catch (error) {
-    logger.error(`[RoomController] validatePlayerInRoom error | roomCode=${roomCode} playerId=${playerId} err=${error}`);
+    logger.error({ event: 'room.validate_player.error', roomCode, playerId, error: serializeError(error) });
     return false;
   }
 }
 
 export async function createRoom(req: Request, res: Response) {
+  const requestId = res.locals['requestId'] as string;
   const parsed = CreateRoomSchema.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.flatten() });
@@ -40,23 +42,23 @@ export async function createRoom(req: Request, res: Response) {
   const code = await generateUniqueCode();
   await dbCreateRoom(code, subject, maxPlayers);
 
-  logger.info(`[RoomController] Room created | code=${code} subject=${subject} maxPlayers=${maxPlayers}`);
+  logger.info({ event: 'room.created', requestId, roomCode: code, subject, maxPlayers, outcome: 'success' });
   res.status(201).json({ code });
 }
 
 export async function getRoomState(req: Request, res: Response) {
+  const requestId = res.locals['requestId'] as string;
   const code = String(req.params.code).toUpperCase();
-  logger.info(`[RoomController] getRoomState | roomCode=${code}`);
-  
+
   const room = await dbGetRoom(code);
   if (!room) {
-    logger.warn(`[RoomController] getRoomState failed | roomCode=${code} reason=not_found`);
+    logger.warn({ event: 'room.get_state.not_found', requestId, roomCode: code, outcome: 'failure' });
     res.status(404).json({ error: 'Room not found' });
     return;
   }
 
   const players = await getPlayers(code);
-  logger.info(`[RoomController] getRoomState | roomCode=${code} status=${room.status} players=${players.length}/${room.max_players}`);
+  logger.info({ event: 'room.get_state', requestId, roomCode: code, roomStatus: room.status, playerCount: players.length, maxPlayers: room.max_players });
 
   // Bug fix: If game is active, include the current question payload for reconnection sync
   const currentQuestion = room.status === 'playing' ? getCurrentClientQuestion(code) : null;
@@ -78,7 +80,15 @@ export async function getRoomState(req: Request, res: Response) {
   });
 }
 
+export async function getRoundState(req: Request, res: Response) {
+  const code = String(req.params.code).toUpperCase();
+  const playerAnswers = getActivePlayerAnswers(code);
+  const pendingReveal = getPendingRevealData(code);
+  res.json({ playerAnswers, pendingReveal });
+}
+
 export async function joinRoom(req: Request, res: Response) {
+  const requestId = res.locals['requestId'] as string;
   const code = String(req.params.code).toUpperCase();
   const parsed = JoinRoomSchema.safeParse(req.body);
   if (!parsed.success) {
@@ -100,7 +110,7 @@ export async function joinRoom(req: Request, res: Response) {
       const existingPlayers = await getPlayers(code);
       const player = existingPlayers.find(p => p.id === existingPlayerId);
       if (player) {
-        logger.info(`[RoomController] Player rejoined via session | roomCode=${code} playerId=${existingPlayerId}`);
+        logger.info({ event: 'room.player_rejoined', requestId, roomCode: code, playerId: existingPlayerId, sessionId, outcome: 'success' });
         // Re-register heartbeat so the player isn't swept as disconnected
         registerPlayerSession(sessionId, existingPlayerId, code);
 
@@ -120,7 +130,8 @@ export async function joinRoom(req: Request, res: Response) {
           })),
         });
 
-        res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator });
+        const currentQuestion = room.status === 'playing' ? getCurrentClientQuestion(code) : null;
+        res.json({ playerId: player.id, name: player.name, color: player.color, isCreator: player.is_creator, status: room.status, currentQuestion });
         return;
       }
     }
@@ -128,12 +139,14 @@ export async function joinRoom(req: Request, res: Response) {
 
   // Reject new joins if game already started
   if (room.status !== 'waiting') {
+    logger.warn({ event: 'room.join.rejected', requestId, roomCode: code, reason: 'game_already_started', roomStatus: room.status });
     res.status(400).json({ error: 'Гра вже почалась' });
     return;
   }
 
   const players = await getPlayers(code);
   if (players.length >= room.max_players) {
+    logger.warn({ event: 'room.join.rejected', requestId, roomCode: code, reason: 'room_full', playerCount: players.length, maxPlayers: room.max_players });
     res.status(400).json({ error: 'Кімната повна' });
     return;
   }
@@ -167,8 +180,8 @@ export async function joinRoom(req: Request, res: Response) {
     })),
   });
 
-  logger.info(`[RoomController] Player joined | roomCode=${code} playerId=${playerId} name=${name} isCreator=${isCreator}`);
-  res.json({ playerId, name, color, isCreator });
+  logger.info({ event: 'room.player_joined', requestId, roomCode: code, playerId, name, isCreator, outcome: 'success' });
+  res.json({ playerId, name, color, isCreator, status: room.status });
 }
 
 export async function heartbeat(req: Request, res: Response) {

@@ -5,16 +5,13 @@ import 'package:go_router/go_router.dart';
 import '../cubits/game_cubit/game_cubit.dart';
 import '../cubits/game_cubit/game_state.dart';
 
-const _subjects = [
-  {
-    'key': 'ukrainian_language',
-    'label': 'Українська мова та літ.',
-    'icon': '🇺🇦',
-  },
-  {'key': 'history', 'label': 'Історія України', 'icon': '📜'},
-  {'key': 'geography', 'label': 'Географія', 'icon': '🗺️'},
-  {'key': 'math', 'label': 'Математика', 'icon': '📐'},
-];
+// Subject key → display icon (fallback for subjects the backend doesn't annotate)
+const _subjectIcons = <String, String>{
+  'ukrainian_language': '🇺🇦',
+  'history': '📜',
+  'geography': '🗺️',
+  'math': '📐',
+};
 
 class CreateRoomScreen extends StatefulWidget {
   const CreateRoomScreen({super.key});
@@ -25,6 +22,15 @@ class CreateRoomScreen extends StatefulWidget {
 class _CreateRoomScreenState extends State<CreateRoomScreen> {
   String? _selectedSubject;
   int _maxPlayers = 2;
+
+  @override
+  void initState() {
+    super.initState();
+    // Load subjects from backend on screen entry
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<GameCubit>().loadSubjects();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -54,68 +60,139 @@ class _CreateRoomScreenState extends State<CreateRoomScreen> {
                 style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 12),
-              ..._subjects.asMap().entries.map((entry) {
-                final i = entry.key;
-                final s = entry.value;
-                final selected = _selectedSubject == s['key'];
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedSubject = s['key']),
-                  child:
-                      AnimatedContainer(
-                            duration: const Duration(milliseconds: 200),
-                            margin: const EdgeInsets.only(bottom: 10),
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 16,
-                              vertical: 14,
-                            ),
-                            decoration: BoxDecoration(
-                              color: selected
-                                  ? const Color(
-                                      0xFF4ECDC4,
-                                    ).withValues(alpha: 0.2)
-                                  : const Color(0xFF161B22),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(
-                                color: selected
-                                    ? const Color(0xFF4ECDC4)
-                                    : Colors.white12,
-                                width: selected ? 2 : 1,
+              // Subject list — driven by backend response
+              BlocBuilder<GameCubit, GameState>(
+                buildWhen: (_, s) =>
+                    s is GameSubjectsLoading ||
+                    s is GameSubjectsLoaded ||
+                    s is GameError,
+                builder: (ctx, state) {
+                  if (state is GameSubjectsLoading) {
+                    return const Center(
+                      child: Padding(
+                        padding: EdgeInsets.symmetric(vertical: 24),
+                        child: CircularProgressIndicator(),
+                      ),
+                    );
+                  }
+                  if (state is GameError) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: Column(
+                        children: [
+                          Text(
+                            state.message,
+                            style: const TextStyle(color: Colors.redAccent),
+                          ),
+                          TextButton(
+                            onPressed: () =>
+                                ctx.read<GameCubit>().loadSubjects(),
+                            child: const Text('Спробувати знову'),
+                          ),
+                        ],
+                      ),
+                    );
+                  }
+                  final subjects = state is GameSubjectsLoaded
+                      ? state.subjects
+                      : const <Map<String, dynamic>>[];
+                  return Column(
+                    children: subjects.asMap().entries.map((entry) {
+                      final i = entry.key;
+                      final s = entry.value;
+                      final key = s['key'] as String? ?? '';
+                      final displayName = s['displayName'] as String? ?? key;
+                      final questionCount = s['questionCount'] as int? ?? 0;
+                      final enabled = s['enabled'] as bool? ?? true;
+                      final icon = _subjectIcons[key] ?? '📚';
+                      final selected = _selectedSubject == key;
+
+                      return GestureDetector(
+                        onTap: enabled
+                            ? () => setState(() => _selectedSubject = key)
+                            : null,
+                        child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                                vertical: 14,
                               ),
-                            ),
-                            child: Row(
-                              children: [
-                                Text(
-                                  s['icon']!,
-                                  style: const TextStyle(fontSize: 24),
+                              decoration: BoxDecoration(
+                                color: !enabled
+                                    ? const Color(0xFF0D1117)
+                                    : selected
+                                        ? const Color(
+                                            0xFF4ECDC4,
+                                          ).withValues(alpha: 0.2)
+                                        : const Color(0xFF161B22),
+                                borderRadius: BorderRadius.circular(14),
+                                border: Border.all(
+                                  color: selected
+                                      ? const Color(0xFF4ECDC4)
+                                      : Colors.white12,
+                                  width: selected ? 2 : 1,
                                 ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  s['label']!,
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: selected
-                                        ? const Color(0xFF4ECDC4)
-                                        : Colors.white,
+                              ),
+                              child: Row(
+                                children: [
+                                  Text(
+                                    icon,
+                                    style: TextStyle(
+                                      fontSize: 24,
+                                      color: enabled ? null : Colors.white24,
+                                    ),
                                   ),
-                                ),
-                                if (selected) ...[
-                                  const Spacer(),
-                                  const Icon(
-                                    Icons.check_circle,
-                                    color: Color(0xFF4ECDC4),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment:
+                                          CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          displayName,
+                                          style: TextStyle(
+                                            fontSize: 16,
+                                            color: enabled
+                                                ? (selected
+                                                    ? const Color(0xFF4ECDC4)
+                                                    : Colors.white)
+                                                : Colors.white24,
+                                          ),
+                                        ),
+                                        Text(
+                                          enabled
+                                              ? '$questionCount питань'
+                                              : 'Недоступно',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            color: enabled
+                                                ? Colors.white38
+                                                : Colors.white24,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
                                   ),
+                                  if (selected)
+                                    const Icon(
+                                      Icons.check_circle,
+                                      color: Color(0xFF4ECDC4),
+                                    ),
                                 ],
-                              ],
-                            ),
-                          )
-                          .animate()
-                          .fadeIn(
-                            delay: Duration(milliseconds: i * 80),
-                            duration: const Duration(milliseconds: 300),
-                          )
-                          .slideX(begin: 0.2),
-                );
-              }),
+                              ),
+                            )
+                            .animate()
+                            .fadeIn(
+                              delay: Duration(milliseconds: i * 80),
+                              duration: const Duration(milliseconds: 300),
+                            )
+                            .slideX(begin: 0.2),
+                      );
+                    }).toList(),
+                  );
+                },
+              ),
               const SizedBox(height: 24),
               const Text(
                 'Кількість гравців',

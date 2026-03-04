@@ -10,26 +10,51 @@ import '../widgets/answer_button.dart';
 import '../widgets/player_chip.dart';
 import '../widgets/timer_bar.dart';
 
-class GameplayScreen extends StatelessWidget {
+class GameplayScreen extends StatefulWidget {
   final String roomCode;
   const GameplayScreen({super.key, required this.roomCode});
+
+  @override
+  State<GameplayScreen> createState() => _GameplayScreenState();
+}
+
+class _GameplayScreenState extends State<GameplayScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Route guard: redirect to home if player hasn't joined
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      final roomCubit = context.read<RoomCubit>();
+      if (roomCubit.myPlayerId == null) {
+        context.go('/');
+        return;
+      }
+      // Fallback: if realtime question event was missed, recover via REST snapshot.
+      await Future<void>.delayed(const Duration(milliseconds: 700));
+      if (!mounted) return;
+      final quizCubit = context.read<QuizCubit>();
+      await quizCubit.recoverFromRoomSnapshot(widget.roomCode);
+      // Start polling fallback for round:update and round:reveal
+      // (Supabase Realtime may not deliver events over LAN via make iphone)
+      if (mounted) quizCubit.startPolling();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<QuizCubit, QuizState>(
       listener: (ctx, state) {
         if (state is QuizReveal) {
-          ctx.go('/room/$roomCode/reveal');
+          ctx.go('/room/${widget.roomCode}/reveal');
         } else if (state is QuizGameEnded) {
-          ctx.go('/room/$roomCode/results');
+          ctx.go('/room/${widget.roomCode}/results');
         }
       },
       builder: (ctx, state) {
         final q = state is QuizQuestion ? state : null;
         if (q == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         return Scaffold(
           body: SafeArea(
@@ -43,10 +68,7 @@ class GameplayScreen extends StatelessWidget {
                     children: [
                       Text(
                         'Питання ${q.questionIndex}/${q.totalQuestions}',
-                        style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.6),
-                          fontSize: 14,
-                        ),
+                        style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 14),
                       ),
                       const Spacer(),
                     ],
@@ -79,9 +101,7 @@ class GameplayScreen extends StatelessWidget {
                                 ),
                               )
                               .animate()
-                              .fadeIn(
-                                duration: const Duration(milliseconds: 400),
-                              )
+                              .fadeIn(duration: const Duration(milliseconds: 400))
                               .slideY(begin: -0.1),
                           const SizedBox(height: 20),
                           // Answer buttons
@@ -89,8 +109,7 @@ class GameplayScreen extends StatelessWidget {
                             shrinkWrap: true,
                             physics: const NeverScrollableScrollPhysics(),
                             itemCount: q.question.choices.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 10),
+                            separatorBuilder: (_, __) => const SizedBox(height: 10),
                             itemBuilder: (ctx, i) {
                               AnswerState answerState = AnswerState.idle;
                               if (q.myAnswer != null) {
@@ -103,9 +122,7 @@ class GameplayScreen extends StatelessWidget {
                                     state: answerState,
                                     // Bug 11 fix: disable all buttons once player has answered
                                     onTap: q.myAnswer == null
-                                        ? () => ctx
-                                              .read<QuizCubit>()
-                                              .submitAnswer(i)
+                                        ? () => ctx.read<QuizCubit>().submitAnswer(i)
                                         : null,
                                   )
                                   .animate()

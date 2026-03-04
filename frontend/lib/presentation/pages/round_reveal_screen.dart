@@ -8,9 +8,30 @@ import '../cubits/room_cubit/room_cubit.dart';
 import '../cubits/room_cubit/room_state.dart';
 import '../widgets/answer_button.dart';
 
-class RoundRevealScreen extends StatelessWidget {
+class RoundRevealScreen extends StatefulWidget {
   final String roomCode;
   const RoundRevealScreen({super.key, required this.roomCode});
+
+  @override
+  State<RoundRevealScreen> createState() => _RoundRevealScreenState();
+}
+
+class _RoundRevealScreenState extends State<RoundRevealScreen> {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (context.read<RoomCubit>().myPlayerId == null) {
+        context.go('/');
+        return;
+      }
+      // Start polling fallback: detects missed question:new when creator presses
+      // "Next Question" and Supabase Realtime doesn't deliver the event (e.g. LAN).
+      // _pollRoundState handles QuizReveal state by calling _pollForNextQuestion.
+      context.read<QuizCubit>().startPolling();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -19,24 +40,23 @@ class RoundRevealScreen extends StatelessWidget {
       listenWhen: (_, curr) => curr is QuizQuestion || curr is QuizGameEnded,
       listener: (ctx, state) {
         if (state is QuizQuestion) {
-          ctx.go('/room/$roomCode/game');
+          ctx.go('/room/${widget.roomCode}/game');
         } else if (state is QuizGameEnded) {
-          ctx.go('/room/$roomCode/results');
+          ctx.go('/room/${widget.roomCode}/results');
         }
       },
       builder: (ctx, state) {
         final rev = state is QuizReveal ? state : null;
         if (rev == null) {
-          return const Scaffold(
-            body: Center(child: CircularProgressIndicator()),
-          );
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
         }
         final isCorrect = rev.myAnswer == rev.correctIndex;
 
         return BlocBuilder<RoomCubit, RoomState>(
           builder: (_, roomState) {
-            final isCreator = roomState.players
-                .any((p) => p.id == context.read<RoomCubit>().myPlayerId && p.isCreator);
+            final isCreator = roomState.players.any(
+              (p) => p.id == context.read<RoomCubit>().myPlayerId && p.isCreator,
+            );
 
             return Scaffold(
               body: SafeArea(
@@ -50,27 +70,19 @@ class RoundRevealScreen extends StatelessWidget {
                             width: double.infinity,
                             padding: const EdgeInsets.all(20),
                             decoration: BoxDecoration(
-                              color: isCorrect
-                                  ? Colors.green.shade900
-                                  : Colors.red.shade900,
+                              color: isCorrect ? Colors.green.shade900 : Colors.red.shade900,
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Column(
                               children: [
                                 Text(
                                   isCorrect ? '✅ Правильно!' : '❌ Помилка',
-                                  style: const TextStyle(
-                                    fontSize: 28,
-                                    fontWeight: FontWeight.w900,
-                                  ),
+                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w900),
                                 ),
                                 if (isCorrect)
                                   Text(
                                     '+${rev.myScoreGained ?? 0} балів',
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      color: Colors.greenAccent,
-                                    ),
+                                    style: const TextStyle(fontSize: 18, color: Colors.greenAccent),
                                   ),
                               ],
                             ),
@@ -82,10 +94,7 @@ class RoundRevealScreen extends StatelessWidget {
                       // Question recap
                       Text(
                         rev.question.text,
-                        style: TextStyle(
-                          fontSize: 16,
-                          color: Colors.white.withValues(alpha: 0.7),
-                        ),
+                        style: TextStyle(fontSize: 16, color: Colors.white.withValues(alpha: 0.7)),
                       ),
                       const SizedBox(height: 16),
                       // Answer buttons with reveal states
@@ -93,25 +102,20 @@ class RoundRevealScreen extends StatelessWidget {
                         AnswerState answerState;
                         if (i == rev.correctIndex) {
                           answerState = AnswerState.correct;
-                        } else if (i == rev.myAnswer &&
-                            rev.myAnswer != rev.correctIndex) {
+                        } else if (i == rev.myAnswer && rev.myAnswer != rev.correctIndex) {
                           answerState = AnswerState.wrong;
                         } else {
                           answerState = AnswerState.idle;
                         }
                         return Padding(
                           padding: const EdgeInsets.only(bottom: 10),
-                          child:
-                              AnswerButton(
-                                    text: rev.question.choices[i],
-                                    state: answerState,
-                                  )
-                                  .animate()
-                                  .fadeIn(
-                                    delay: Duration(milliseconds: i * 100),
-                                    duration: const Duration(milliseconds: 300),
-                                  )
-                                  .slideX(begin: 0.1),
+                          child: AnswerButton(text: rev.question.choices[i], state: answerState)
+                              .animate()
+                              .fadeIn(
+                                delay: Duration(milliseconds: i * 100),
+                                duration: const Duration(milliseconds: 300),
+                              )
+                              .slideX(begin: 0.1),
                         );
                       }),
                       const Spacer(),
@@ -121,10 +125,7 @@ class RoundRevealScreen extends StatelessWidget {
                         children: [
                           const Text(
                             'Рахунок:',
-                            style: TextStyle(
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
-                            ),
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                           const SizedBox(height: 8),
                           ...roomState.players.map((p) {
@@ -136,16 +137,11 @@ class RoundRevealScreen extends StatelessWidget {
                                   CircleAvatar(
                                     radius: 12,
                                     backgroundColor: Color(
-                                      int.parse(
-                                        p.color.replaceFirst('#', '0xFF'),
-                                      ),
+                                      int.parse(p.color.replaceFirst('#', '0xFF')),
                                     ),
                                     child: Text(
                                       p.name[0],
-                                      style: const TextStyle(
-                                        fontSize: 10,
-                                        color: Colors.white,
-                                      ),
+                                      style: const TextStyle(fontSize: 10, color: Colors.white),
                                     ),
                                   ),
                                   const SizedBox(width: 8),
@@ -169,21 +165,21 @@ class RoundRevealScreen extends StatelessWidget {
                       if (isCreator)
                         SizedBox(
                           width: double.infinity,
-                          child: FilledButton.icon(
-                            onPressed: () =>
-                                context.read<QuizCubit>().nextQuestion(),
-                            icon: const Icon(Icons.arrow_forward_rounded),
-                            label: const Text(
-                              'Наступне питання',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                          )
-                              .animate()
-                              .fadeIn(
-                                delay: const Duration(milliseconds: 500),
-                                duration: const Duration(milliseconds: 300),
-                              )
-                              .slideY(begin: 0.3),
+                          child:
+                              FilledButton.icon(
+                                    onPressed: () => context.read<QuizCubit>().nextQuestion(),
+                                    icon: const Icon(Icons.arrow_forward_rounded),
+                                    label: const Text(
+                                      'Наступне питання',
+                                      style: TextStyle(fontSize: 16),
+                                    ),
+                                  )
+                                  .animate()
+                                  .fadeIn(
+                                    delay: const Duration(milliseconds: 500),
+                                    duration: const Duration(milliseconds: 300),
+                                  )
+                                  .slideY(begin: 0.3),
                         )
                       else
                         Center(

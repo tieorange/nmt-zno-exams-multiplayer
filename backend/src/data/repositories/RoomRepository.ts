@@ -80,6 +80,11 @@ export async function removePlayer(roomCode: string, playerId: string): Promise<
   if (error) throw new Error(`[RoomRepo] removePlayer failed: ${error.message}`);
 }
 
+export async function clearAllCreators(roomCode: string): Promise<void> {
+  const { error } = await supabase.from('players').update({ is_creator: false }).eq('room_code', roomCode);
+  if (error) throw new Error(`[RoomRepo] clearAllCreators failed: ${error.message}`);
+}
+
 export async function setCreator(roomCode: string, playerId: string): Promise<void> {
   const { error } = await supabase.from('players').update({ is_creator: true }).eq('id', playerId).eq('room_code', roomCode);
   if (error) throw new Error(`[RoomRepo] setCreator failed: ${error.message}`);
