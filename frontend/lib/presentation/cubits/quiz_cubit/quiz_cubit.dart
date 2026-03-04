@@ -404,6 +404,18 @@ class QuizCubit extends Cubit<QuizState> {
     }
   }
 
+  void reset() {
+    logger.i('[QuizCubit] resetting state');
+    _timer?.cancel();
+    _timer = null;
+    _stopPolling();
+    _currentQuestion = null;
+    _myPlayerId = null;
+    _roomCode = null;
+    _questionIndex = 0;
+    emit(const QuizInitial());
+  }
+
   @override
   Future<void> close() {
     logger.i('[QuizCubit] closing');

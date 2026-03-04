@@ -28,11 +28,8 @@ class RoomCubit extends Cubit<RoomState> {
     return s;
   }
 
-  RoomCubit({
-    required this.supabaseService,
-    required this.apiService,
-    required this.logger,
-  }) : super(const RoomState()) {
+  RoomCubit({required this.supabaseService, required this.apiService, required this.logger})
+    : super(const RoomState()) {
     _sub = supabaseService.events.listen(_handleEvent);
   }
 
@@ -84,8 +81,7 @@ class RoomCubit extends Cubit<RoomState> {
         'finished' => RoomStatus.finished,
         _ => RoomStatus.waiting,
       };
-      final currentQuestion =
-          result['currentQuestion'] as Map<String, dynamic>?;
+      final currentQuestion = result['currentQuestion'] as Map<String, dynamic>?;
       if (currentQuestion != null) {
         _pendingSnapshot = currentQuestion;
         logger.i(
@@ -104,17 +100,19 @@ class RoomCubit extends Cubit<RoomState> {
       // Start heartbeat — backend disconnects players after 60s of silence
       _startHeartbeat(roomCode.toUpperCase());
     } catch (e, st) {
-      logger.e({
-        'feature': 'RoomCubit',
-        'event': 'room.join.failed',
-        'roomCode': roomCode,
-        'currentStatus': state.status.name,
-        'outcome': 'failure',
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
-      emit(
-        state.copyWith(status: RoomStatus.error, errorMessage: e.toString()),
+      logger.e(
+        {
+          'feature': 'RoomCubit',
+          'event': 'room.join.failed',
+          'roomCode': roomCode,
+          'currentStatus': state.status.name,
+          'outcome': 'failure',
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
       );
+      emit(state.copyWith(status: RoomStatus.error, errorMessage: e.toString()));
     }
   }
 
@@ -145,8 +143,7 @@ class RoomCubit extends Cubit<RoomState> {
       emit(state.copyWith(status: RoomStatus.playing, isStartingGame: false));
     } catch (e, st) {
       final err = e.toString();
-      if (err.contains('Гра вже почалась') ||
-          err.contains('game_already_started')) {
+      if (err.contains('Гра вже почалась') || err.contains('game_already_started')) {
         logger.w({
           'feature': 'RoomCubit',
           'event': 'game.start.already_started',
@@ -157,20 +154,20 @@ class RoomCubit extends Cubit<RoomState> {
         return;
       }
       _hasStartRequest = false;
-      logger.e({
-        'feature': 'RoomCubit',
-        'event': 'game.start.failed',
-        'roomCode': state.code,
-        'currentStatus': state.status.name,
-        'outcome': 'failure',
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.e(
+        {
+          'feature': 'RoomCubit',
+          'event': 'game.start.failed',
+          'roomCode': state.code,
+          'currentStatus': state.status.name,
+          'outcome': 'failure',
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
       emit(
-        state.copyWith(
-          status: RoomStatus.error,
-          errorMessage: e.toString(),
-          isStartingGame: false,
-        ),
+        state.copyWith(status: RoomStatus.error, errorMessage: e.toString(), isStartingGame: false),
       );
     }
   }
@@ -187,29 +184,24 @@ class RoomCubit extends Cubit<RoomState> {
         final playerId = event.data['playerId'] as String?;
         logger.w('[RoomCubit] player disconnected | playerId=$playerId');
         if (playerId != null) {
-          emit(
-            state.copyWith(
-              players: state.players.where((p) => p.id != playerId).toList(),
-            ),
-          );
+          emit(state.copyWith(players: state.players.where((p) => p.id != playerId).toList()));
         }
         break;
       case RealtimeEventType.roundReveal:
         // Update all player scores from the event
         final scoreMap = event.data['scores'] as Map<String, dynamic>? ?? {};
-        final updatedPlayers =
-            state.players.map((p) {
-              if (scoreMap.containsKey(p.id)) {
-                return PlayerModel(
-                  id: p.id,
-                  name: p.name,
-                  color: p.color,
-                  score: scoreMap[p.id] as int,
-                  isCreator: p.isCreator,
-                );
-              }
-              return p;
-            }).toList();
+        final updatedPlayers = state.players.map((p) {
+          if (scoreMap.containsKey(p.id)) {
+            return PlayerModel(
+              id: p.id,
+              name: p.name,
+              color: p.color,
+              score: scoreMap[p.id] as int,
+              isCreator: p.isCreator,
+            );
+          }
+          return p;
+        }).toList();
 
         emit(state.copyWith(players: updatedPlayers));
         break;
@@ -229,8 +221,7 @@ class RoomCubit extends Cubit<RoomState> {
     for (var attempt = 1; attempt <= 3; attempt++) {
       try {
         final room = await apiService.getRoomState(roomCode);
-        final currentQuestion =
-            room['currentQuestion'] as Map<String, dynamic>?;
+        final currentQuestion = room['currentQuestion'] as Map<String, dynamic>?;
         if (currentQuestion != null) {
           _pendingSnapshot = currentQuestion;
           logger.i(
@@ -238,13 +229,9 @@ class RoomCubit extends Cubit<RoomState> {
           );
           return;
         }
-        logger.w(
-          '[RoomCubit] snapshot missing | roomCode=$roomCode attempt=$attempt',
-        );
+        logger.w('[RoomCubit] snapshot missing | roomCode=$roomCode attempt=$attempt');
       } catch (e) {
-        logger.w(
-          '[RoomCubit] snapshot fetch failed | roomCode=$roomCode attempt=$attempt err=$e',
-        );
+        logger.w('[RoomCubit] snapshot fetch failed | roomCode=$roomCode attempt=$attempt err=$e');
       }
       if (attempt < 3) {
         await Future.delayed(const Duration(milliseconds: 200));
@@ -263,10 +250,9 @@ class RoomCubit extends Cubit<RoomState> {
         'finished' => RoomStatus.finished,
         _ => RoomStatus.waiting,
       };
-      final players =
-          (room['players'] as List? ?? [])
-              .map((p) => PlayerModel.fromJson(p as Map<String, dynamic>))
-              .toList();
+      final players = (room['players'] as List? ?? [])
+          .map((p) => PlayerModel.fromJson(p as Map<String, dynamic>))
+          .toList();
 
       final currentQuestion = room['currentQuestion'] as Map<String, dynamic>?;
       if (currentQuestion != null) {
@@ -291,26 +277,28 @@ class RoomCubit extends Cubit<RoomState> {
           status: status,
           maxPlayers: room['maxPlayers'] as int? ?? state.maxPlayers,
           players: players,
-          isStartingGame:
-              status == RoomStatus.waiting ? false : state.isStartingGame,
+          isStartingGame: status == RoomStatus.waiting ? false : state.isStartingGame,
         ),
       );
     } catch (e, st) {
-      logger.w({
-        'feature': 'RoomCubit',
-        'event': 'room.sync.failed',
-        'roomCode': state.code,
-        'currentStatus': state.status.name,
-        'error': e.toString(),
-      }, error: e, stackTrace: st);
+      logger.w(
+        {
+          'feature': 'RoomCubit',
+          'event': 'room.sync.failed',
+          'roomCode': state.code,
+          'currentStatus': state.status.name,
+          'error': e.toString(),
+        },
+        error: e,
+        stackTrace: st,
+      );
     }
   }
 
   void _handleRoomState(Map<String, dynamic> data) {
-    final players =
-        (data['players'] as List? ?? [])
-            .map((p) => PlayerModel.fromJson(p as Map<String, dynamic>))
-            .toList();
+    final players = (data['players'] as List? ?? [])
+        .map((p) => PlayerModel.fromJson(p as Map<String, dynamic>))
+        .toList();
     final statusStr = data['status'] as String? ?? 'waiting';
     final status = switch (statusStr) {
       'playing' => RoomStatus.playing,
@@ -320,9 +308,7 @@ class RoomCubit extends Cubit<RoomState> {
     if (status == RoomStatus.waiting) {
       _hasStartRequest = false;
     }
-    logger.i(
-      '[RoomCubit] room:state | status=$statusStr players=${players.length}',
-    );
+    logger.i('[RoomCubit] room:state | status=$statusStr players=${players.length}');
     emit(
       state.copyWith(
         code: data['code'] as String? ?? state.code,
@@ -330,10 +316,22 @@ class RoomCubit extends Cubit<RoomState> {
         status: status,
         maxPlayers: data['maxPlayers'] as int? ?? state.maxPlayers,
         players: players,
-        isStartingGame:
-            status == RoomStatus.waiting ? false : state.isStartingGame,
+        isStartingGame: status == RoomStatus.waiting ? false : state.isStartingGame,
       ),
     );
+  }
+
+  void leaveRoom() {
+    logger.i('[RoomCubit] leaving room | roomCode=${state.code}');
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
+    _hasStartRequest = false;
+    _pendingSnapshot = null;
+    myPlayerId = null;
+    myName = null;
+    myIsCreator = false;
+    supabaseService.unsubscribe();
+    emit(const RoomState());
   }
 
   @override

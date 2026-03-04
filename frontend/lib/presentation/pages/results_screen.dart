@@ -54,10 +54,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
     if (roomCubit.myPlayerId == null) return;
     setState(() => _restartLoading = true);
     try {
-      await roomCubit.apiService.restartGame(
-        roomCubit.state.code,
-        roomCubit.myPlayerId!,
-      );
+      await roomCubit.apiService.restartGame(roomCubit.state.code, roomCubit.myPlayerId!);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -105,10 +102,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                         const SizedBox(height: 16),
                         const Text(
                               '🏆 Підсумки',
-                              style: TextStyle(
-                                fontSize: 32,
-                                fontWeight: FontWeight.w900,
-                              ),
+                              style: TextStyle(fontSize: 32, fontWeight: FontWeight.w900),
                             )
                             .animate()
                             .fadeIn(duration: const Duration(milliseconds: 600))
@@ -123,15 +117,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
                               final rank = entry['rank'] as int? ?? i + 1;
                               final name = entry['name'] as String? ?? '—';
                               final score = entry['score'] as int? ?? 0;
-                              final color =
-                                  entry['color'] as String? ?? '#4ECDC4';
-                              final playerColor = Color(
-                                int.parse(color.replaceFirst('#', '0xFF')),
-                              );
+                              final color = entry['color'] as String? ?? '#4ECDC4';
+                              final playerColor = Color(int.parse(color.replaceFirst('#', '0xFF')));
                               final medals = ['🥇', '🥈', '🥉'];
-                              final medal = rank <= 3
-                                  ? medals[rank - 1]
-                                  : '$rank.';
+                              final medal = rank <= 3 ? medals[rank - 1] : '$rank.';
 
                               return Container(
                                     margin: const EdgeInsets.only(bottom: 12),
@@ -141,26 +130,19 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                     ),
                                     decoration: BoxDecoration(
                                       color: rank == 1
-                                          ? const Color(
-                                              0xFFFFD700,
-                                            ).withValues(alpha: 0.15)
+                                          ? const Color(0xFFFFD700).withValues(alpha: 0.15)
                                           : const Color(0xFF161B22),
                                       borderRadius: BorderRadius.circular(16),
                                       border: Border.all(
                                         color: rank == 1
-                                            ? const Color(
-                                                0xFFFFD700,
-                                              ).withValues(alpha: 0.5)
+                                            ? const Color(0xFFFFD700).withValues(alpha: 0.5)
                                             : Colors.white12,
                                         width: rank == 1 ? 2 : 1,
                                       ),
                                     ),
                                     child: Row(
                                       children: [
-                                        Text(
-                                          medal,
-                                          style: const TextStyle(fontSize: 24),
-                                        ),
+                                        Text(medal, style: const TextStyle(fontSize: 24)),
                                         const SizedBox(width: 12),
                                         CircleAvatar(
                                           radius: 20,
@@ -209,9 +191,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: FilledButton.icon(
-                              onPressed: _restartLoading
-                                  ? null
-                                  : _restartGame,
+                              onPressed: _restartLoading ? null : _restartGame,
                               icon: _restartLoading
                                   ? const SizedBox(
                                       width: 18,
@@ -224,17 +204,12 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                   : const Icon(Icons.replay_rounded),
                               label: const Text(
                                 'Грати знову',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               style: FilledButton.styleFrom(
                                 backgroundColor: const Color(0xFF4ECDC4),
                                 foregroundColor: Colors.black,
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -246,24 +221,20 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
-                              onPressed: () => ctx.go('/create'),
+                              onPressed: () {
+                                ctx.read<RoomCubit>().leaveRoom();
+                                ctx.read<QuizCubit>().reset();
+                                ctx.go('/create');
+                              },
                               icon: const Icon(Icons.add_circle_outline),
                               label: const Text(
                                 'Нова тема',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
-                                side: const BorderSide(
-                                  color: Color(0xFF4ECDC4),
-                                  width: 1.5,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
+                                side: const BorderSide(color: Color(0xFF4ECDC4), width: 1.5),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -274,24 +245,20 @@ class _ResultsScreenState extends State<ResultsScreen> {
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
-                              onPressed: () => ctx.go('/'),
+                              onPressed: () {
+                                ctx.read<RoomCubit>().leaveRoom();
+                                ctx.read<QuizCubit>().reset();
+                                ctx.go('/');
+                              },
                               icon: const Icon(Icons.login_rounded),
                               label: const Text(
                                 'Приєднатися до кімнати',
-                                style: TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.w600,
-                                ),
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                               ),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
-                                side: const BorderSide(
-                                  color: Color(0xFF4ECDC4),
-                                  width: 1.5,
-                                ),
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 16,
-                                ),
+                                side: const BorderSide(color: Color(0xFF4ECDC4), width: 1.5),
+                                padding: const EdgeInsets.symmetric(vertical: 16),
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
