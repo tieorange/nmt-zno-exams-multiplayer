@@ -36,7 +36,7 @@ class QuizCubit extends Cubit<QuizState> {
   /// Safe to call multiple times — cancels any existing poll timer first.
   void startPolling() {
     _pollTimer?.cancel();
-    _pollTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _pollTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       _pollRoundState();
     });
   }
@@ -249,7 +249,13 @@ class QuizCubit extends Cubit<QuizState> {
       return;
     }
 
-    // Stop for any other non-question state (loading, error, game ended)
+    // SCENARIO 3: Stuck on results screen — poll for game restart
+    if (s is QuizGameEnded) {
+      await _pollForGameRestart();
+      return;
+    }
+
+    // Stop for any other non-question state (loading, error)
     if (s is! QuizQuestion) {
       _stopPolling();
       return;
@@ -286,6 +292,26 @@ class QuizCubit extends Cubit<QuizState> {
     }
   }
 
+  /// REST fallback: detect when the creator restarts the game from the results screen.
+  Future<void> _pollForGameRestart() async {
+    if (_roomCode == null) return;
+    try {
+      final room = await apiService.getRoomState(_roomCode!);
+      if (room['status'] == 'playing') {
+        final snapshot = room['currentQuestion'] as Map<String, dynamic>?;
+        if (snapshot != null) {
+          logger.i('[QuizCubit] poll detected game restart | roomCode=$_roomCode');
+          _stopPolling();
+          _questionIndex = 0; // reset index for new game
+          bootstrapFromSnapshot(snapshot); // emits QuizQuestion
+          startPolling();
+        }
+      }
+    } catch (e) {
+      logger.d('[QuizCubit] _pollForGameRestart error (silent) | $e');
+    }
+  }
+
   bool _mapsEqual(Map<String, int?> a, Map<String, int?> b) {
     if (a.length != b.length) return false;
     for (final k in a.keys) {
@@ -300,6 +326,23 @@ class QuizCubit extends Cubit<QuizState> {
     if (_roomCode == null) return;
     try {
       final room = await apiService.getRoomState(_roomCode!);
+
+      if (room['status'] == 'finished') {
+        logger.i('[QuizCubit] poll detected game end | roomCode=$_roomCode');
+        _stopPolling();
+
+        final playersList = room['players'] as List? ?? [];
+        final scoreboard = playersList.map((p) => Map<String, dynamic>.from(p as Map)).toList();
+        scoreboard.sort((a, b) => (b['score'] as int? ?? 0).compareTo(a['score'] as int? ?? 0));
+        for (int i = 0; i < scoreboard.length; i++) {
+          scoreboard[i]['rank'] = i + 1;
+        }
+
+        _timer?.cancel();
+        emit(QuizGameEnded(scoreboard: scoreboard));
+        return;
+      }
+
       final snapshot = room['currentQuestion'] as Map<String, dynamic>?;
       if (snapshot == null) return;
       final newQId = snapshot['id'] as String?;

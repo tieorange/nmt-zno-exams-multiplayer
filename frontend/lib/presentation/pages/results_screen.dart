@@ -40,6 +40,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
           _confetti.play();
         }
       }
+
+      // Start polling fallback to detect if creator restarts the game
+      context.read<QuizCubit>().startPolling();
     });
   }
 
@@ -241,7 +244,33 @@ class _ResultsScreenState extends State<ResultsScreen> {
                               ),
                             ),
                           ),
-                        ] else
+                        ] else ...[
+                          // New Game — non-creator becomes creator of a fresh room
+                          SizedBox(
+                            width: double.infinity,
+                            child: FilledButton.icon(
+                              onPressed: () {
+                                ctx.read<RoomCubit>().leaveRoom();
+                                ctx.read<QuizCubit>().reset();
+                                ctx.go('/create');
+                              },
+                              icon: const Icon(Icons.add_circle_outline),
+                              label: const Text(
+                                'Нова гра',
+                                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                              ),
+                              style: FilledButton.styleFrom(
+                                backgroundColor: const Color(0xFF4ECDC4),
+                                foregroundColor: Colors.black,
+                                padding: const EdgeInsets.symmetric(vertical: 16),
+                                shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14),
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          // Join Room — go to home screen to join another player's room
                           SizedBox(
                             width: double.infinity,
                             child: OutlinedButton.icon(
@@ -265,6 +294,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                               ),
                             ),
                           ),
+                        ],
                       ],
                     ),
                   ),

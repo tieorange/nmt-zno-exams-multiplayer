@@ -28,7 +28,7 @@ class _RoomLobbyScreenState extends State<RoomLobbyScreen> {
     });
 
     // Fallback sync: if realtime events are missed, poll room state while waiting.
-    _roomSyncTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+    _roomSyncTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       final cubit = context.read<RoomCubit>();
       if (cubit.state.status == RoomStatus.waiting) {
