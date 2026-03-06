@@ -1,6 +1,17 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
+
+/// Forces all typed characters to uppercase.
+class _UpperCaseFormatter extends TextInputFormatter {
+  @override
+  TextEditingValue formatEditUpdate(
+    TextEditingValue oldValue,
+    TextEditingValue newValue,
+  ) =>
+      newValue.copyWith(text: newValue.text.toUpperCase());
+}
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -11,77 +22,119 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   final _codeController = TextEditingController();
+  final _focusNode = FocusNode();
 
   void _showJoinDialog() {
+    _codeController.clear();
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
+      useSafeArea: true,
       backgroundColor: const Color(0xFF161B22),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      builder: (ctx) => Padding(
-        padding: EdgeInsets.fromLTRB(
-          24,
-          24,
-          24,
-          MediaQuery.of(ctx).viewInsets.bottom + 24,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'Приєднатися до кімнати',
-              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-            ),
-            const SizedBox(height: 16),
-            TextField(
-              controller: _codeController,
-              autofocus: true,
-              textCapitalization: TextCapitalization.characters,
-              maxLength: 3,
-              decoration: InputDecoration(
-                hintText: 'Код кімнати (напр. A9X)',
-                filled: true,
-                fillColor: const Color(0xFF0D1117),
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(12),
-                  borderSide: BorderSide.none,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSheetState) {
+          final bottomInset = MediaQuery.of(ctx).viewInsets.bottom;
+
+          void submit() {
+            final code = _codeController.text.trim();
+            if (code.length == 3) {
+              Navigator.pop(ctx);
+              context.go('/room/$code');
+            }
+          }
+
+          return Padding(
+            padding: EdgeInsets.fromLTRB(24, 24, 24, bottomInset + 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Приєднатися до кімнати',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
                 ),
-                counterText: '',
-              ),
-              style: const TextStyle(
-                fontSize: 24,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 8,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 16),
-            SizedBox(
-              width: double.infinity,
-              child: FilledButton(
-                onPressed: () {
-                  final code = _codeController.text.trim().toUpperCase();
-                  if (code.length == 3) {
-                    Navigator.pop(ctx);
-                    context.go('/room/$code');
-                  }
-                },
-                style: FilledButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
+                const SizedBox(height: 16),
+                TextField(
+                  controller: _codeController,
+                  focusNode: _focusNode,
+                  textCapitalization: TextCapitalization.characters,
+                  textInputAction: TextInputAction.go,
+                  maxLength: 3,
+                  scrollPadding: const EdgeInsets.only(bottom: 80),
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[A-Za-z0-9]')),
+                    _UpperCaseFormatter(),
+                  ],
+                  onSubmitted: (_) => submit(),
+                  decoration: InputDecoration(
+                    hintText: 'Код кімнати (напр. A9X)',
+                    filled: true,
+                    fillColor: const Color(0xFF0D1117),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide.none,
+                    ),
+                    counterText: '',
+                  ),
+                  style: const TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 8,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-                child: const Text(
-                  'Приєднатися',
-                  style: TextStyle(fontSize: 16),
+                const SizedBox(height: 16),
+                ValueListenableBuilder<TextEditingValue>(
+                  valueListenable: _codeController,
+                  builder: (_, value, __) => SizedBox(
+                    width: double.infinity,
+                    child: FilledButton(
+                      onPressed: value.text.length == 3 ? submit : null,
+                      style: FilledButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(vertical: 16),
+                      ),
+                      child: const Text(
+                        'Приєднатися',
+                        style: TextStyle(fontSize: 16),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
+          );
+        },
       ),
     );
+    // Request focus only after the bottom sheet slide-up animation completes,
+    // so the keyboard never appears before the sheet is fully visible.
+    // This avoids the iOS Safari race condition caused by a fixed-time delay.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      void requestWhenReady() {
+        if (mounted) _focusNode.requestFocus();
+      }
+
+      final overlayState = Navigator.of(context).overlay;
+      final route =
+          overlayState != null ? ModalRoute.of(overlayState.context) : null;
+
+      if (route?.animation != null &&
+          route!.animation!.status != AnimationStatus.completed) {
+        void onStatus(AnimationStatus status) {
+          if (status == AnimationStatus.completed) {
+            route.animation!.removeStatusListener(onStatus);
+            requestWhenReady();
+          }
+        }
+        route.animation!.addStatusListener(onStatus);
+      } else {
+        // Fallback: sheet already open or no animation available.
+        Future.delayed(const Duration(milliseconds: 400), requestWhenReady);
+      }
+    });
   }
 
   @override
@@ -215,6 +268,7 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   void dispose() {
     _codeController.dispose();
+    _focusNode.dispose();
     super.dispose();
   }
 }

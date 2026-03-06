@@ -134,6 +134,45 @@ class _GameplayScreenState extends State<GameplayScreen> {
                             },
                           ),
                           const SizedBox(height: 12),
+                          // Answer locked confirmation
+                          if (q.myAnswer != null)
+                            Padding(
+                              padding: const EdgeInsets.only(bottom: 12),
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 10,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF4ECDC4).withValues(alpha: 0.08),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(
+                                    color: const Color(0xFF4ECDC4).withValues(alpha: 0.35),
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: const [
+                                    Icon(
+                                      Icons.lock_outline,
+                                      color: Color(0xFF4ECDC4),
+                                      size: 16,
+                                    ),
+                                    SizedBox(width: 8),
+                                    Text(
+                                      'Відповідь збережена! Очікуємо на інших... 🔒',
+                                      style: TextStyle(
+                                        color: Color(0xFF4ECDC4),
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              )
+                                  .animate()
+                                  .fadeIn(duration: 400.ms)
+                                  .slideY(begin: 0.3),
+                            ),
                           // Player status chips
                           BlocBuilder<RoomCubit, RoomState>(
                             builder: (ctx, roomState) => Wrap(

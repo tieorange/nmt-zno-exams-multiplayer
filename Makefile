@@ -87,11 +87,12 @@ all: supabase-start kill-port-3000
 # Replaces localhost in URLs with the Mac's LAN IP automatically.
 # Flutter logs appear in this terminal. For JS console logs on iPhone:
 #   Safari > Develop > [your iPhone's name] > [page]
-iphone: supabase-start kill-port-3000
+iphone: supabase-start kill-port-3000 kill-port-5000
 	@echo ""
-	@echo "📱 iPhone testing mode — local network"
+	@echo "📱 iPhone testing mode — local network (Dual Frontend)"
 	@echo "   Mac IP   : $(LOCAL_IP)"
-	@echo "   Frontend : http://$(LOCAL_IP):$(IPHONE_PORT)"
+	@echo "   iPhone   : http://$(LOCAL_IP):$(IPHONE_PORT)"
+	@echo "   Mac (Host): http://localhost:5000 (Chrome opens automatically)"
 	@echo "   Backend  : http://$(LOCAL_IP):3000"
 	@echo "   Supabase : $(SUPABASE_URL_MOBILE)"
 	@echo ""
@@ -99,10 +100,11 @@ iphone: supabase-start kill-port-3000
 	@echo ""
 	@npx --yes qrcode --small "http://$(LOCAL_IP):$(IPHONE_PORT)"
 	@echo ""
-	@echo "Starting backend + Flutter web server (both in this terminal)..."
+	@echo "Starting backend + 2x Flutter frontends (Mac + iPhone) in this terminal..."
 	@echo ""
-	npx --yes concurrently --kill-others --prefix-colors "cyan,magenta" --names "BE,FE" \
+	npx --yes concurrently --kill-others --prefix-colors "cyan,magenta,yellow" --names "BE,FE-Mac,FE-iPh" \
 		"cd backend && npm run dev" \
+		"cd frontend && flutter run -d chrome --web-port=5000 $(FLUTTER_DEFINES)" \
 		"cd frontend && flutter run -d web-server --web-hostname=0.0.0.0 --web-port=$(IPHONE_PORT) --dart-define=SUPABASE_URL=$(SUPABASE_URL_MOBILE) --dart-define=SUPABASE_ANON_KEY=$(SUPABASE_ANON_KEY) --dart-define=API_URL=http://$(LOCAL_IP):3000"
 
 seed:

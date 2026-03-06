@@ -118,7 +118,9 @@ class _ResultsScreenState extends State<ResultsScreen> {
                             itemBuilder: (_, i) {
                               final entry = scoreboard[i];
                               final rank = entry['rank'] as int? ?? i + 1;
-                              final name = entry['name'] as String? ?? '—';
+                              final originalName = entry['name'] as String? ?? '—';
+                              final isMe = entry['id'] == ctx.read<RoomCubit>().myPlayerId;
+                              final name = isMe ? '$originalName (Ви)' : originalName;
                               final score = entry['score'] as int? ?? 0;
                               final color = entry['color'] as String? ?? '#4ECDC4';
                               final playerColor = Color(int.parse(color.replaceFirst('#', '0xFF')));
@@ -151,7 +153,7 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                           radius: 20,
                                           backgroundColor: playerColor,
                                           child: Text(
-                                            name[0],
+                                            originalName[0],
                                             style: const TextStyle(
                                               color: Colors.white,
                                               fontWeight: FontWeight.bold,
@@ -162,9 +164,10 @@ class _ResultsScreenState extends State<ResultsScreen> {
                                         Expanded(
                                           child: Text(
                                             name,
-                                            style: const TextStyle(
+                                            overflow: TextOverflow.ellipsis,
+                                            style: TextStyle(
                                               fontSize: 16,
-                                              fontWeight: FontWeight.w600,
+                                              fontWeight: isMe ? FontWeight.w900 : FontWeight.w600,
                                             ),
                                           ),
                                         ),

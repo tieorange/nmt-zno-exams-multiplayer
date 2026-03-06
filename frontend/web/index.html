@@ -6,7 +6,7 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="НМТ Квіз — Мультиплеєр">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
@@ -19,6 +19,31 @@
 
   <title>НМТ Квіз</title>
   <link rel="manifest" href="manifest.json">
+
+  <script>
+    // iOS Safari: bridge visual viewport changes to Flutter layout.
+    // iOS Safari does not support the interactive-widget viewport property, so
+    // MediaQuery.viewInsets.bottom stays 0 when the keyboard appears. This
+    // listener detects the visual-viewport shrink caused by the keyboard and
+    // resizes the Flutter canvas to match, causing Flutter to recalculate its
+    // layout metrics and correctly report viewInsets.bottom.
+    (function () {
+      if (!window.visualViewport) return;
+
+      function syncFlutterViewport() {
+        var vvHeight = window.visualViewport.height;
+        var vvTop    = window.visualViewport.offsetTop;
+        var el = document.querySelector('flt-glass-pane');
+        if (!el) return;
+        el.style.position = 'absolute';
+        el.style.top      = vvTop + 'px';
+        el.style.height   = vvHeight + 'px';
+      }
+
+      window.visualViewport.addEventListener('resize', syncFlutterViewport);
+      window.visualViewport.addEventListener('scroll', syncFlutterViewport);
+    })();
+  </script>
 
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
