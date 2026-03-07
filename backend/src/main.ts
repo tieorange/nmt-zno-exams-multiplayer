@@ -20,6 +20,7 @@ process.on('uncaughtException', (err) => {
 });
 
 const app = express();
+app.set('trust proxy', 1); // Trust Render's reverse proxy — enables real client IP for rate limiting
 
 // CORS configuration - require explicit origin in production
 const isProduction = process.env.NODE_ENV === 'production';
