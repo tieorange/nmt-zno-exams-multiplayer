@@ -1,4 +1,4 @@
-.PHONY: help supabase-start supabase-stop supabase-push backend frontend all seed install lint lint-backend lint-frontend kill-port-3000 kill-port-5000 iphone
+.PHONY: help supabase-start supabase-stop supabase-push backend frontend all seed install lint lint-backend lint-frontend kill-port-3000 kill-port-5000 iphone deploy-frontend
 
 # --- Auto-read Supabase credentials from backend/.env ---
 SUPABASE_URL      := $(shell grep -E '^SUPABASE_URL='      backend/.env | cut -d= -f2-)
@@ -125,3 +125,18 @@ lint-frontend:
 
 lint: lint-backend lint-frontend
 	@echo "✅ Linting complete!"
+
+# --- Production Deploy ---
+# Override API_URL with your Render backend URL:
+#   make deploy-frontend API_URL=https://your-backend.onrender.com
+# SUPABASE_URL and SUPABASE_ANON_KEY are read from backend/.env automatically.
+deploy-frontend:
+	@echo "🏗️  Building Flutter Web for production..."
+	@echo "  → SUPABASE_URL=$(SUPABASE_URL)"
+	@echo "  → API_URL=$(API_URL)"
+	cd frontend && flutter build web --release \
+		--dart-define=SUPABASE_URL=$(SUPABASE_URL) \
+		--dart-define=SUPABASE_ANON_KEY=$(SUPABASE_ANON_KEY) \
+		--dart-define=API_URL=$(API_URL)
+	@echo "🚀 Deploying to Cloudflare Pages..."
+	npx wrangler pages deploy frontend/build/web --project-name=nmt-quiz
