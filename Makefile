@@ -89,23 +89,21 @@ all: supabase-start kill-port-3000
 #   Safari > Develop > [your iPhone's name] > [page]
 iphone: supabase-start kill-port-3000 kill-port-5000
 	@echo ""
-	@echo "📱 iPhone testing mode — local network (Dual Frontend)"
+	@echo "📱 iPhone testing mode — local network (Single Frontend)"
 	@echo "   Mac IP   : $(LOCAL_IP)"
-	@echo "   iPhone   : http://$(LOCAL_IP):$(IPHONE_PORT)"
-	@echo "   Mac (Host): http://localhost:5000 (Chrome opens automatically)"
+	@echo "   App URL  : http://$(LOCAL_IP):$(FRONTEND_PORT) (Chrome opens automatically)"
 	@echo "   Backend  : http://$(LOCAL_IP):3000"
 	@echo "   Supabase : $(SUPABASE_URL_MOBILE)"
 	@echo ""
 	@echo "Scan this QR code with your iPhone camera:"
 	@echo ""
-	@npx --yes qrcode --small "http://$(LOCAL_IP):$(IPHONE_PORT)"
+	@npx --yes qrcode --small "http://$(LOCAL_IP):$(FRONTEND_PORT)"
 	@echo ""
-	@echo "Starting backend + 2x Flutter frontends (Mac + iPhone) in this terminal..."
+	@echo "Starting backend + Flutter frontend (serving Mac + iPhone) in this terminal..."
 	@echo ""
-	npx --yes concurrently --kill-others --prefix-colors "cyan,magenta,yellow" --names "BE,FE-Mac,FE-iPh" \
+	npx --yes concurrently --kill-others --prefix-colors "cyan,magenta" --names "BE,FE-LAN" \
 		"cd backend && npm run dev" \
-		"cd frontend && flutter run -d chrome --web-port=5000 $(FLUTTER_DEFINES)" \
-		"cd frontend && flutter run -d web-server --web-hostname=0.0.0.0 --web-port=$(IPHONE_PORT) --dart-define=SUPABASE_URL=$(SUPABASE_URL_MOBILE) --dart-define=SUPABASE_ANON_KEY=$(SUPABASE_ANON_KEY) --dart-define=API_URL=http://$(LOCAL_IP):3000"
+		"cd frontend && flutter run -d chrome --web-hostname=$(LOCAL_IP) --web-port=$(FRONTEND_PORT) --dart-define=SUPABASE_URL=$(SUPABASE_URL_MOBILE) --dart-define=SUPABASE_ANON_KEY=$(SUPABASE_ANON_KEY) --dart-define=API_URL=http://$(LOCAL_IP):3000"
 
 seed:
 	@echo "Seeding local database..."
