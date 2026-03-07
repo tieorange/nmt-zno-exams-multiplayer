@@ -27,6 +27,8 @@ const asyncHandler = (fn: (req: Request, res: Response, next: NextFunction) => P
     Promise.resolve(fn(req, res, next)).catch(next);
   };
 
+router.get('/health', (_req, res) => { res.json({ ok: true }); });
+
 router.get('/subjects', asyncHandler(getSubjects));
 router.post('/rooms', roomCreationLimit, asyncHandler(createRoom));
 router.get('/rooms/:code', validateRoomCode, asyncHandler(getRoomState));
